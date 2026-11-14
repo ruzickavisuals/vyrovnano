@@ -791,3 +791,23 @@ body.intro-hold .brand .logo { visibility: hidden; }
 body.intro-go #root main { transition: opacity 0.55s ease 0.1s, transform 0.85s var(--ease) 0.05s; transform-origin: 50% 0; }
 body.intro-go #root .ava-btn { transition: opacity 0.5s ease 0.35s; }
 body.intro-go .tabbar { transition: translate 0.75s var(--ease) 0.25s; }
+
+/* Krátký seznam ve skupině, historie úprav a okno se všemi záznamy */
+.more-btn { margin-top: 10px; }
+.log-title { margin-top: 22px; }
+.log-row { align-items: flex-start; }
+.log-row .grow { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.log-text { font-size: 14px; line-height: 1.35; overflow-wrap: anywhere; }
+.log-row small { font-size: 12px; font-variant-numeric: tabular-nums; }
+.filters { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px; }
+.filters .select { min-width: 0; }
+.filters .select-btn { width: 100%; min-width: 0; }
+.filters .select-val { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.all-entries .day:first-of-type { margin-top: 4px; }
+.all-entries .search-sum { align-items: center; }
+
+/* Nenápadné oznámení o nové verzi aplikace */
+.update-bar { position: fixed; z-index: 150; left: 0; right: 0; margin: 0 auto; width: max-content; max-width: calc(100vw - 32px);
+  top: calc(env(safe-area-inset-top) + 10px);
+  padding: 9px 16px; border-radius: 999px; background: var(--accent); color: var(--on-accent); font-size: 13px; font-weight: 700;
+  box-shadow: 0 6px 20px rgb(0 0 0 / 0.3); animation: rise 0.3s var(--ease) both; white-space: nowrap; }

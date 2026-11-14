@@ -4,8 +4,8 @@ import {
   balances, settle, stats, debtMove, vocative, toIban, spayd, dateLabel, seed,
 } from './logic.js';
 import {
-  syncEnabled, shared, canon, merge, sanitize, sig, listRemote, joinRemote, leaveRemote,
-  resetInvite, kickRemote, deleteAccount, groupUserIds, syncGroup, listBackups, getBackup, isAdmin, savePushSub, deletePushSub, getNotifyPrefs, setNotifyPrefs,
+  syncEnabled, shared, canon, merge, sanitize, sig, LOG_MAX, listRemote, joinRemote, leaveRemote,
+  resetInvite, kickRemote, remoteVersion, deleteAccount, groupUserIds, syncGroup, listBackups, getBackup, isAdmin, savePushSub, deletePushSub, getNotifyPrefs, setNotifyPrefs,
 } from './sync.js';
 import {
   getSession, onAuthChange, signUp, signIn, signInWithGoogle, sendPasswordReset,
@@ -657,7 +657,7 @@ function WelcomeCard({ groups, name }) {
 
 /* ---------- Detail skupiny ---------- */
 
-function GroupView({ group, onBack, onEdit, onShare, onEntry, onAdd, onPay, onQr, onMove, onSearch, onDelete }) {
+function GroupView({ group, onBack, onEdit, onShare, onEntry, onAdd, onPay, onQr, onMove, onSearch, onDelete, onAll, onLog }) {
   const [tab, setTab] = useState('entries');
   const bal = useMemo(() => balances(group), [group]);
   const st = useMemo(() => stats(group), [group]);
@@ -685,10 +685,11 @@ function GroupView({ group, onBack, onEdit, onShare, onEntry, onAdd, onPay, onQr
   // Dlouhé seznamy se vykreslí znovu jen při změně dat skupiny. Otevření okna nebo jiná drobná
   // změna stavu je tak nepřepočítává a animace zůstávají plynulé.
   const cb = useRef({});
-  cb.current = { onEntry, onDelete, onPay, onQr, onMove };
+  cb.current = { onEntry, onDelete, onPay, onQr, onMove, onAll, onLog };
   const canMove = !!onMove;
   const entriesView = useMemo(() => html`<${Entries} group=${group}
-    onEntry=${(e) => cb.current.onEntry(e)} onDelete=${(e) => cb.current.onDelete(e)} />`, [group]);
+    onEntry=${(e) => cb.current.onEntry(e)} onDelete=${(e) => cb.current.onDelete(e)}
+    onAll=${() => cb.current.onAll()} onLog=${() => cb.current.onLog()} />`, [group]);
   const debtsView = useMemo(() => html`<${Debts} group=${group} bal=${bal}
     onPay=${(p) => cb.current.onPay(p)} onQr=${(p) => cb.current.onQr(p)}
     onMove=${canMove ? (p) => cb.current.onMove(p) : null} />`, [group, bal, canMove]);
@@ -735,65 +736,238 @@ function GroupView({ group, onBack, onEdit, onShare, onEntry, onAdd, onPay, onQr
   `;
 }
 
-function Entries({ group, onEntry, onDelete }) {
+// Jeden řádek záznamu (výdaj, příjem nebo převod). Používá ho krátký seznam ve skupině i okno „Všechny záznamy“.
+function EntryRow({ group, e, onEntry, onDelete, showDate }) {
   const cur = group.currency;
-  if (!group.entries.length) {
-    return html`<div class="empty"><div class="big">💸</div><p>Zatím žádné výdaje.<br />Přidej první tlačítkem +.</p></div>`;
+  const base = baseAmount(e);
+  const when = showDate ? html`<span class="muted"> · ${dateLabel(e.date)}</span>` : '';
+  if (e.kind === 'transfer') {
+    const to = Object.keys(e.parts)[0];
+    // Dopad na můj zůstatek: kdo platí, tomu zůstatek roste; příjemci klesá.
+    const mineT = e.paidBy === group.me ? base : to === group.me ? -base : 0;
+    // Převedený dluh z jiné skupiny čteme jako „dlužník dluží věřiteli“, ne jako platbu.
+    const moved = e.mvd === 'in';
+    const paid = !e.mv && (!e.title || e.title === 'Převod' || /vyrovn|uhra[zd]/i.test(e.title));
+    return html`
+      <${SwipeRow} onDelete=${() => onDelete(e)} onEdit=${() => onEntry(e)}>
+      <button class="item" onClick=${() => onEntry(e)}>
+        <span class="avatar sm">${e.mv ? '🔀' : '💱'}</span>
+        <span class="grow">
+          <strong>${moved ? `${nameOf(group, to)} dluží ${nameOf(group, e.paidBy)}` : `${nameOf(group, e.paidBy)} → ${nameOf(group, to)}`}</strong>
+          <small>${paid ? html`<span class="paid-tag">uhrazeno</span>` : html`<span class="muted">${e.title}</span>`}${when}</small>
+        </span>
+        <span class="right">
+          <strong>${fmt(e.amount, e.currency)}</strong>
+          <small><${Balance} cents=${mineT} currency=${cur} zero="netýká se tě" /></small>
+        </span>
+      </button>
+      <//>
+    `;
   }
-  const sorted = [...group.entries].reverse().sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
+  const inc = e.kind === 'income';
+  const mine = (inc ? -1 : 1) * ((e.paidBy === group.me ? base : 0) - (shares(e)[group.me] || 0));
+  return html`
+    <${SwipeRow} onDelete=${() => onDelete(e)} onEdit=${() => onEntry(e)}>
+    <button class="item" onClick=${() => onEntry(e)}>
+      <span class="avatar sm">${inc ? '💰' : cat(catOf(e)).e}</span>
+      <span class="grow">
+        <strong>${e.title}</strong>
+        <small class="muted">${inc ? 'příjem · přijal(a)' : 'platil(a)'} ${nameOf(group, e.paidBy)}${e.currency !== cur ? ` · ${fmt(e.amount, e.currency)}` : ''}${when}</small>
+      </span>
+      <span class="right">
+        <strong>${inc ? '+' : ''}${fmt(base, cur)}</strong>
+        <small><${Balance} cents=${mine} currency=${cur} zero="netýká se tě" /></small>
+      </span>
+    </button>
+    <//>
+  `;
+}
+
+// Záznamy seskupené po dnech (vstup už je seřazený podle data).
+function DayList({ group, items, onEntry, onDelete }) {
   const days = [];
-  for (const e of sorted) {
+  for (const e of items) {
     if (!days.length || days[days.length - 1].date !== e.date) days.push({ date: e.date, items: [] });
     days[days.length - 1].items.push(e);
   }
   return days.map((d) => html`
     <h3 class="day">${dateLabel(d.date)}</h3>
     <div class="card list">
-      ${d.items.map((e) => {
-        const base = baseAmount(e);
-        if (e.kind === 'transfer') {
-          const to = Object.keys(e.parts)[0];
-          // Dopad na můj zůstatek: kdo platí, tomu zůstatek roste; příjemci klesá.
-          const mineT = e.paidBy === group.me ? base : to === group.me ? -base : 0;
-          // Převedený dluh z jiné skupiny čteme jako „dlužník dluží věřiteli“, ne jako platbu.
-          const moved = e.mvd === 'in';
-          const paid = !e.mv && (!e.title || e.title === 'Převod' || /vyrovn|uhra[zd]/i.test(e.title));
-          return html`
-            <${SwipeRow} onDelete=${() => onDelete(e)} onEdit=${() => onEntry(e)}>
-            <button class="item" onClick=${() => onEntry(e)}>
-              <span class="avatar sm">${e.mv ? '🔀' : '💱'}</span>
-              <span class="grow">
-                <strong>${moved ? `${nameOf(group, to)} dluží ${nameOf(group, e.paidBy)}` : `${nameOf(group, e.paidBy)} → ${nameOf(group, to)}`}</strong>
-                <small>${paid ? html`<span class="paid-tag">uhrazeno</span>` : html`<span class="muted">${e.title}</span>`}</small>
-              </span>
-              <span class="right">
-                <strong>${fmt(e.amount, e.currency)}</strong>
-                <small><${Balance} cents=${mineT} currency=${cur} zero="netýká se tě" /></small>
-              </span>
-            </button>
-            <//>
-          `;
-        }
-        const inc = e.kind === 'income';
-        const mine = (inc ? -1 : 1) * ((e.paidBy === group.me ? base : 0) - (shares(e)[group.me] || 0));
-        return html`
-          <${SwipeRow} onDelete=${() => onDelete(e)} onEdit=${() => onEntry(e)}>
-          <button class="item" onClick=${() => onEntry(e)}>
-            <span class="avatar sm">${inc ? '💰' : cat(catOf(e)).e}</span>
-            <span class="grow">
-              <strong>${e.title}</strong>
-              <small class="muted">${inc ? 'příjem · přijal(a)' : 'platil(a)'} ${nameOf(group, e.paidBy)}${e.currency !== cur ? ` · ${fmt(e.amount, e.currency)}` : ''}</small>
-            </span>
-            <span class="right">
-              <strong>${inc ? '+' : ''}${fmt(base, cur)}</strong>
-              <small><${Balance} cents=${mine} currency=${cur} zero="netýká se tě" /></small>
-            </span>
-          </button>
-          <//>
-        `;
-      })}
+      ${d.items.map((e) => html`<${EntryRow} key=${e.id} group=${group} e=${e} onEntry=${onEntry} onDelete=${onDelete} />`)}
     </div>
   `);
+}
+
+// Od nejnovějšího: podle data, v rámci dne naposledy přidané nahoře.
+const newestFirst = (entries) => [...entries].reverse().sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
+const plural = (n, one, few, many) => `${n} ${n === 1 ? one : n >= 2 && n <= 4 ? few : many}`;
+
+/* ---------- Historie úprav ---------- */
+
+const LOG_ICON = { add: '➕', edit: '✏️', del: '🗑️', pay: '✅', move: '🔀', unmove: '↩️', join: '👋', group: '⚙️', restore: '⏪', import: '📥' };
+const logTime = (t) => new Date(t).toLocaleString('cs-CZ', { day: 'numeric', month: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+const logWho = (group, l) => group.members.find((m) => m.id === l.by)?.name || l.n || 'Někdo';
+
+function LogRow({ group, l }) {
+  return html`
+    <div class="item static log-row">
+      <span class="avatar sm">${LOG_ICON[l.a] || '✏️'}</span>
+      <span class="grow">
+        <span class="log-text"><strong>${logWho(group, l)}</strong> · ${l.text}</span>
+        <small class="muted">${logTime(l.t)}</small>
+      </span>
+    </div>`;
+}
+
+// Kolik posledních záznamů a úprav je vidět přímo ve skupině; zbytek je v samostatném okně.
+const RECENT_ENTRIES = 8;
+const RECENT_LOG = 5;
+
+function Entries({ group, onEntry, onDelete, onAll, onLog }) {
+  const total = group.entries.length;
+  const recent = newestFirst(group.entries).slice(0, RECENT_ENTRIES);
+  const log = group.log || [];
+  const lastLog = log.slice(-RECENT_LOG).reverse();
+  return html`
+    ${total === 0
+      ? html`<div class="empty"><div class="big">💸</div><p>Zatím žádné výdaje.<br />Přidej první tlačítkem +.</p></div>`
+      : html`
+        <${DayList} group=${group} items=${recent} onEntry=${onEntry} onDelete=${onDelete} />
+        <button class="btn wide more-btn" onClick=${onAll}>
+          ${total > RECENT_ENTRIES ? `Zobrazit vše (${total})` : 'Hledat, filtrovat a řadit'}
+        </button>`}
+    <h3 class="day log-title">Historie úprav</h3>
+    ${log.length === 0
+      ? html`<p class="hint">Zatím tu nic není. Od teď se sem zapisuje, kdo a kdy co přidal, upravil, smazal nebo uhradil.</p>`
+      : html`
+        <div class="card list">${lastLog.map((l) => html`<${LogRow} key=${l.id} group=${group} l=${l} />`)}</div>
+        ${log.length > RECENT_LOG && html`<button class="btn wide more-btn" onClick=${onLog}>Celá historie (${log.length})</button>`}`}
+  `;
+}
+
+// Okno „Všechny záznamy“: hledání, filtry a řazení přes celou historii skupiny.
+// `keep` si pamatuje nastavení, když si odtud otevřeš záznam a vrátíš se zpět.
+const SORTS = [['new', 'Od nejnovějších'], ['old', 'Od nejstarších'], ['high', 'Od nejvyšší částky'], ['low', 'Od nejnižší částky'], ['az', 'Podle názvu A–Z']];
+const PAGE = 100;
+function AllEntries({ group, keep, onEntry, onDelete }) {
+  const [f, setF] = useState(() => ({ q: '', kind: '', who: '', cat: '', sort: 'new', ...(keep.current || {}) }));
+  const [shown, setShown] = useState(PAGE);
+  const set = (patch) => { const next = { ...f, ...patch }; keep.current = next; setF(next); setShown(PAGE); };
+  const index = useMemo(() => searchIndex([group]), [group]);
+  const cats = useMemo(() => {
+    const used = new Set(group.entries.filter((e) => e.kind === 'expense').map(catOf));
+    return [...used].map((id) => [id, `${cat(id).e} ${cat(id).n}`]).sort((a, b) => a[1].localeCompare(b[1], 'cs'));
+  }, [group]);
+  const tokens = fold(f.q).split(/\s+/).filter(Boolean);
+  const found = useMemo(() => {
+    const list = index.filter((it) =>
+      tokens.every((t) => matchToken(it, t))
+      && (!f.kind || it.e.kind === f.kind)
+      && (!f.who || it.e.paidBy === f.who || f.who in it.e.parts)
+      && (!f.cat || (it.e.kind === 'expense' && catOf(it.e) === f.cat)));
+    if (f.sort === 'old') list.reverse();
+    else if (f.sort === 'high') list.sort((a, b) => b.base - a.base);
+    else if (f.sort === 'low') list.sort((a, b) => a.base - b.base);
+    else if (f.sort === 'az') list.sort((a, b) => (a.e.title || 'Převod').localeCompare(b.e.title || 'Převod', 'cs'));
+    return list;
+  }, [index, f]);
+  const spent = found.reduce((sum, it) => sum + (it.e.kind === 'expense' ? it.base : 0), 0);
+  const filtered = !!(tokens.length || f.kind || f.who || f.cat);
+  const page = found.slice(0, shown).map((it) => it.e);
+  const byDay = f.sort === 'new' || f.sort === 'old';
+  return html`
+    <div class="form search all-entries">
+      <div class="search-box">
+        <${Icon} name="search" size=${18} />
+        <input value=${f.q} placeholder="Název, částka, člověk, datum…" aria-label="Hledat v záznamech"
+          enterkeyhint="search" autocomplete="off" autocapitalize="off" onInput=${(e) => set({ q: e.target.value })} />
+        ${f.q && html`<button type="button" class="search-clear" aria-label="Smazat hledání" onClick=${() => set({ q: '' })}><${Icon} name="close" size=${12} /></button>`}
+      </div>
+      <div class="filters">
+        <${Select} label="Typ záznamu" value=${f.kind} onChange=${(kind) => set({ kind, cat: kind && kind !== 'expense' ? '' : f.cat })}
+          options=${[['', 'Všechny typy'], ['expense', 'Výdaje'], ['income', 'Příjmy'], ['transfer', 'Převody a úhrady']]} />
+        <${Select} label="Člověk" value=${f.who} onChange=${(who) => set({ who })}
+          options=${[['', 'Kdokoli'], ...group.members.map((m) => [m.id, m.name])]} />
+        <${Select} label="Kategorie" value=${f.cat} onChange=${(c) => set({ cat: c, kind: c ? 'expense' : f.kind })}
+          options=${[['', 'Všechny kategorie'], ...cats]} />
+        <${Select} label="Řazení" value=${f.sort} onChange=${(sort) => set({ sort })} options=${SORTS} />
+      </div>
+      <div class="search-sum">
+        <strong>${found.length === 0 ? 'Nic nenalezeno' : plural(found.length, 'záznam', 'záznamy', 'záznamů')}${filtered ? ` z ${group.entries.length}` : ''}</strong>
+        ${spent > 0 && html`<span class="muted">výdaje celkem <strong>${fmt(spent, group.currency)}</strong></span>`}
+        ${filtered && html`<button type="button" class="link-btn" onClick=${() => set({ q: '', kind: '', who: '', cat: '' })}>Zrušit filtry</button>`}
+      </div>
+      ${byDay
+        ? html`<${DayList} group=${group} items=${page} onEntry=${onEntry} onDelete=${onDelete} />`
+        : page.length > 0 && html`
+          <div class="card list">
+            ${page.map((e) => html`<${EntryRow} key=${e.id} group=${group} e=${e} onEntry=${onEntry} onDelete=${onDelete} showDate=${true} />`)}
+          </div>`}
+      ${found.length > shown && html`
+        <button class="btn wide more-btn" onClick=${() => setShown(shown + PAGE)}>Zobrazit dalších ${Math.min(PAGE, found.length - shown)}</button>`}
+    </div>
+  `;
+}
+
+// Okno „Historie úprav“: celá historie s hledáním a filtrem podle druhu úpravy a člověka.
+const LOG_KINDS = [['', 'Všechny úpravy'], ['add', 'Přidání'], ['edit', 'Úpravy'], ['del', 'Smazání'], ['pay', 'Úhrady a převody'], ['group', 'Skupina a členové']];
+const LOG_GROUP = { add: 'add', import: 'add', edit: 'edit', del: 'del', unmove: 'del', pay: 'pay', move: 'pay', join: 'group', group: 'group', restore: 'group' };
+function LogSheet({ group }) {
+  const [q, setQ] = useState('');
+  const [kind, setKind] = useState('');
+  const [who, setWho] = useState('');
+  const [old, setOld] = useState(false);
+  const [shown, setShown] = useState(PAGE);
+  const log = group.log || [];
+  const people = useMemo(() => {
+    const seen = new Map();
+    for (const l of log) seen.set(l.by || l.n, logWho(group, l));
+    return [...seen.entries()];
+  }, [group]);
+  const tokens = fold(q).split(/\s+/).filter(Boolean);
+  const found = log.filter((l) =>
+    (!kind || LOG_GROUP[l.a] === kind)
+    && (!who || (l.by || l.n) === who)
+    && tokens.every((t) => fold(`${logWho(group, l)} ${l.text} ${logTime(l.t)}`).includes(t)));
+  if (!old) found.reverse();
+  return html`
+    <div class="form search all-entries">
+      <div class="search-box">
+        <${Icon} name="search" size=${18} />
+        <input value=${q} placeholder="Hledat v historii…" aria-label="Hledat v historii úprav"
+          enterkeyhint="search" autocomplete="off" autocapitalize="off" onInput=${(e) => { setQ(e.target.value); setShown(PAGE); }} />
+        ${q && html`<button type="button" class="search-clear" aria-label="Smazat hledání" onClick=${() => setQ('')}><${Icon} name="close" size=${12} /></button>`}
+      </div>
+      <div class="filters">
+        <${Select} label="Druh úpravy" value=${kind} onChange=${setKind} options=${LOG_KINDS} />
+        <${Select} label="Člověk" value=${who} onChange=${setWho} options=${[['', 'Kdokoli'], ...people]} />
+        <${Select} label="Řazení" value=${old ? 'old' : 'new'} onChange=${(v) => setOld(v === 'old')} options=${SORTS.slice(0, 2)} />
+      </div>
+      <div class="search-sum">
+        <strong>${found.length === 0 ? 'Nic nenalezeno' : plural(found.length, 'úprava', 'úpravy', 'úprav')}</strong>
+      </div>
+      ${found.length > 0 && html`
+        <div class="card list">${found.slice(0, shown).map((l) => html`<${LogRow} key=${l.id} group=${group} l=${l} />`)}</div>`}
+      ${found.length > shown && html`
+        <button class="btn wide more-btn" onClick=${() => setShown(shown + PAGE)}>Zobrazit dalších ${Math.min(PAGE, found.length - shown)}</button>`}
+      <p class="hint">Historie se zapisuje od 14. 11. 2026 a drží posledních ${LOG_MAX} úprav. Starší změny v ní nejsou.</p>
+    </div>
+  `;
+}
+
+// Co se při úpravě záznamu změnilo – do historie úprav.
+function entryChanges(g, a, b) {
+  const out = [];
+  const day = (d) => { const [y, m, dd] = d.split('-'); return `${+dd}. ${+m}. ${y}`; };
+  if (a.title !== b.title) out.push(`název „${a.title}“ → „${b.title}“`);
+  if (a.amount !== b.amount || a.currency !== b.currency) out.push(`částka ${fmt(a.amount, a.currency)} → ${fmt(b.amount, b.currency)}`);
+  if (a.paidBy !== b.paidBy) out.push(`platil(a) ${nameOf(g, a.paidBy)} → ${nameOf(g, b.paidBy)}`);
+  if (a.date !== b.date) out.push(`datum ${day(a.date)} → ${day(b.date)}`);
+  if (a.kind !== b.kind) out.push('typ záznamu');
+  else if (a.kind === 'expense' && catOf(a) !== catOf(b)) out.push(`kategorie ${cat(catOf(a)).n} → ${cat(catOf(b)).n}`);
+  if (a.mode !== b.mode || canon(a.parts) !== canon(b.parts)) out.push('rozdělení mezi lidi');
+  if ((a.rate || 1) !== (b.rate || 1)) out.push('kurz');
+  return out;
 }
 
 function Debts({ group, bal, onPay, onQr, onMove }) {
@@ -1919,6 +2093,7 @@ function App({ user, recovery }) {
   gidRef.current = gid;
   const busy = useRef({});
   const synced = useRef({});
+  const versions = useRef({});
   // Zprávy pro ostatní členy čekají, až se změna uloží na server; pak se odešlou jako notifikace.
   const outbox = useRef({});
   // type: entry | deleted | paid | joined. memberIds = členové, kterých se změna přímo týká;
@@ -1935,7 +2110,10 @@ function App({ user, recovery }) {
   useEffect(() => { if (!leaving.current) localStorage.setItem(pkey, JSON.stringify(profile)); }, [profile]);
 
   const group = groups.find((g) => g.id === gid);
-  const close = () => setSheet(null);
+  // Záznam otevřený z okna „Všechny záznamy“ se po zavření vrací zpět do něj (sheet.back).
+  // Samotné okno se záznamy zůstává otevřené i po smazání řádku přímo v něm.
+  const close = () => setSheet((cur) => (cur?.back ? { type: cur.back } : cur?.type === 'entries' ? cur : null));
+  const allKeep = useRef(null);
   // Dotyk: tažení od levého okraje doprava = zpět. Aktuální obrazovka (okno, nebo skupina) jede
   // s prstem a pod ní je vidět ta, na kterou se vracíš. Po puštění buď dojede pryč, nebo se vrátí.
   const sheetRef = useRef(sheet);
@@ -2029,6 +2207,11 @@ function App({ user, recovery }) {
     if (!user || !g || busy.current[id]) return;
     busy.current[id] = true;
     try {
+      // Nic jsem nezměnil a server má stejnou verzi jako minule: není co stahovat (šetří data i baterii).
+      if (g.remote && versions.current[id] != null && sig(g) === synced.current[id]) {
+        const v = await remoteVersion(id).catch(() => undefined);
+        if (v != null && v === versions.current[id]) { setSyncState('ok'); return; }
+      }
       const res = await syncGroup(g);
       if (res.gone) {
         // Přístup mi byl odebrán nebo skupina zanikla: zmizí i z tohoto zařízení.
@@ -2037,6 +2220,7 @@ function App({ user, recovery }) {
         setGid((cur) => (cur === id ? null : cur));
       } else {
         synced.current[id] = canon(res.data);
+        versions.current[id] = res.version;
         const box = outbox.current[id];
         if (box) {
           delete outbox.current[id];
@@ -2138,6 +2322,12 @@ function App({ user, recovery }) {
   }, []);
 
   /* --- úpravy dat --- */
+  // Přidá do skupiny řádek historie úprav: kdo (já), kdy (teď) a co se stalo.
+  const logged = (g, a, text) => {
+    const me = g.members.find((m) => m.id === g.me);
+    const row = { id: uid(), t: Date.now(), by: me?.id, n: me?.name || prof.name || '', a, text: String(text).slice(0, 300) };
+    return { ...g, log: [...(g.log || []), row].slice(-LOG_MAX) };
+  };
   const putGroup = (g) => {
     setGroups((gs) => (gs.some((x) => x.id === g.id) ? gs.map((x) => (x.id === g.id ? g : x)) : [...gs, g]));
     close();
@@ -2148,15 +2338,41 @@ function App({ user, recovery }) {
       if (!groups.some((x) => x.id === g.id)) out.id = crypto.randomUUID();
       out.members = out.members.map((m) => ({ ...m, uid: m.id === out.me ? user.id : m.uid === user.id ? undefined : m.uid }));
     }
+    const before = groups.find((x) => x.id === g.id);
+    if (!before) out = logged(out, 'group', `skupina „${out.name}“ vytvořena`);
+    else {
+      const ch = [];
+      if (before.name !== out.name) ch.push(`název „${before.name}“ → „${out.name}“`);
+      if (before.currency !== out.currency) ch.push(`měna ${before.currency} → ${out.currency}`);
+      const was = new Map(before.members.map((m) => [m.id, m]));
+      const now = new Map(out.members.map((m) => [m.id, m]));
+      for (const m of out.members) {
+        const o = was.get(m.id);
+        if (!o) ch.push(`přidán člen ${m.name}`);
+        else {
+          if (o.name !== m.name) ch.push(`člen ${o.name} přejmenován na ${m.name}`);
+          if ((o.iban || '') !== (m.iban || '')) ch.push(`změna čísla účtu (${m.name})`);
+          if (!!o.inactive !== !!m.inactive) ch.push(`${m.name} ${m.inactive ? 'označen jako neaktivní' : 'znovu aktivní'}`);
+        }
+      }
+      for (const m of before.members) if (!now.has(m.id)) ch.push(`odebrán člen ${m.name}`);
+      if (before.emoji !== out.emoji || before.color !== out.color) ch.push('vzhled skupiny');
+      if (ch.length) out = logged(out, 'group', `upravena skupina: ${ch.join(', ')}`);
+    }
     putGroup(out);
   }
   const saveEntry = (e, note, type = 'entry') => {
     const entry = { ...e, u: Date.now() };
-    const has = group.entries.some((x) => x.id === e.id);
+    const old = group.entries.find((x) => x.id === e.id);
+    const has = !!old;
     const what = e.kind === 'transfer' ? 'převod' : e.kind === 'income' ? 'příjem' : 'výdaj';
-    announce(group, note || `${has ? 'upraven' : 'nový'} ${what} „${e.title}“ (${fmt(e.amount, e.currency)})`,
-      e.kind === 'transfer' ? 'paid' : type, [e.paidBy, ...Object.keys(e.parts)]);
-    putGroup({ ...group, entries: has ? group.entries.map((x) => (x.id === e.id ? entry : x)) : [...group.entries, entry] });
+    const text = note || `${has ? 'upraven' : 'nový'} ${what} „${e.title}“ (${fmt(e.amount, e.currency)})`;
+    announce(group, text, e.kind === 'transfer' ? 'paid' : type, [e.paidBy, ...Object.keys(e.parts)]);
+    // Historie úprav: u úpravy zapisujeme i to, co se změnilo; uložení beze změny se nezapisuje.
+    const changes = has ? entryChanges(group, old, e) : [];
+    const base = !has ? logged(group, e.kind === 'transfer' ? 'pay' : 'add', text)
+      : changes.length ? logged(group, 'edit', `${text}: ${changes.join(', ')}`) : group;
+    putGroup({ ...base, entries: has ? group.entries.map((x) => (x.id === e.id ? entry : x)) : [...group.entries, entry] });
   };
   // Mazání a zápis platby jsou špatně vratné, proto se vždy ptáme.
   async function deleteEntry(id) {
@@ -2175,13 +2391,16 @@ function App({ user, recovery }) {
       if (!(await ask(`Zrušit převod dluhu ${fmt(e.amount, e.currency)}? Smaže se v obou skupinách a dluh se ${where}.`, { ok: 'Zrušit převod' }))) return;
       announce(group, `zrušen převod dluhu ${fmt(e.amount, e.currency)}`, 'deleted', [e.paidBy, ...Object.keys(e.parts)]);
       if (twin) announce(other, `zrušen převod dluhu ${fmt(e.amount, e.currency)}`, 'deleted', [twin.paidBy, ...Object.keys(twin.parts)]);
+      const undo = `zrušen převod dluhu ${fmt(e.amount, e.currency)}`;
       setGroups((gs) => gs.map((g) => (
-        g.id === group.id ? drop(g, e.id) : twin && g.id === other.id ? drop(g, twin.id) : g)));
+        g.id === group.id ? drop(logged(g, 'unmove', `${undo} (druhá část byla ve skupině „${other.name}“)`), e.id)
+        : twin && g.id === other.id ? drop(logged(g, 'unmove', `${undo} (druhá část byla ve skupině „${group.name}“)`), twin.id) : g)));
       return close();
     }
     if (!(await ask(`Opravdu smazat záznam „${e.title || 'Převod'}“ (${fmt(e.amount, e.currency)})? Zmizí všem členům skupiny.`, { ok: 'Smazat' }))) return;
+    const gone = `smazán záznam „${e.title || 'Převod'}“ (${fmt(e.amount, e.currency)}, ${nameOf(group, e.paidBy)}${e.kind === 'transfer' ? ' → ' + nameOf(group, Object.keys(e.parts)[0]) : ''})`;
     announce(group, `smazán záznam „${e.title || 'Převod'}“ (${fmt(e.amount, e.currency)})`, 'deleted', [e.paidBy, ...Object.keys(e.parts)]);
-    putGroup(drop(group, id));
+    putGroup(drop(logged(group, 'del', gone), id));
   }
   async function payDebt(p) {
     const msg = `Označit dluh jako uhrazený? ${nameOf(group, p.from)} → ${nameOf(group, p.to)}, ${fmt(p.amount, group.currency)}. Peníze tím nikam neodejdou, jen se platba zapíše do historie a dluh zmizí všem členům.`;
@@ -2202,8 +2421,11 @@ function App({ user, recovery }) {
     announce(group, `dluh ${amount} (${nameOf(group, pay.from)} → ${nameOf(group, pay.to)}) převeden do skupiny „${target.name}“`, 'paid', [pay.from, pay.to]);
     announce(target, `dluh ${amount} (${f.name} → ${t.name}) převeden ze skupiny „${group.name}“`, 'paid', [f.id, t.id]);
     setGroups((gs) => gs.map((g) => (
-      g.id === group.id ? { ...g, entries: [...g.entries, pair.out] }
-      : g.id === target.id ? { ...g, entries: [...g.entries, pair.in] } : g)));
+      g.id === group.id
+        ? { ...logged(g, 'move', `dluh ${amount} (${nameOf(group, pay.from)} → ${nameOf(group, pay.to)}) převeden do skupiny „${target.name}“`), entries: [...g.entries, pair.out] }
+      : g.id === target.id
+        ? { ...logged(g, 'move', `dluh ${amount} (${f.name} → ${t.name}) převeden ze skupiny „${group.name}“`), entries: [...g.entries, pair.in] }
+      : g)));
     close();
   }
   function openQr(pay) {
@@ -2219,12 +2441,13 @@ function App({ user, recovery }) {
     const taken = id && group.members.find((m) => m.id === id)?.uid;
     if (taken && taken !== user?.id) return notify('Tohoto člena si mezitím vybral někdo jiný. Vyber prosím jiného.');
     announce(group, `nový člen ve skupině (${id ? nameOf(group, id) : newName})`, 'joined');
+    const joined = (g) => logged(g, 'join', id ? `připojil(a) se ke skupině jako ${nameOf(group, id)}` : 'připojil(a) se ke skupině');
     if (id) {
-      putGroup({ ...group, mu: Date.now(), me: id,
-        members: group.members.map((m) => (m.id === id ? { ...m, ...mine, avatar: m.avatar || profile.avatar, iban: m.iban || profile.iban || undefined } : m)) });
+      putGroup(joined({ ...group, mu: Date.now(), me: id,
+        members: group.members.map((m) => (m.id === id ? { ...m, ...mine, avatar: m.avatar || profile.avatar, iban: m.iban || profile.iban || undefined } : m)) }));
     } else {
       const m = { id: uid(), name: newName, avatar: profile.avatar, iban: profile.iban || undefined, ...mine };
-      putGroup({ ...group, mu: Date.now(), me: m.id, members: [...group.members, m] });
+      putGroup(joined({ ...group, mu: Date.now(), me: m.id, members: [...group.members, m] }));
       if (!profile.name) setProfile({ ...profile, name: newName });
     }
   }
@@ -2263,7 +2486,7 @@ function App({ user, recovery }) {
         if (ref.current.some((x) => x.name === g.name) &&
             !(await ask(`Skupinu „${g.name}“ už máš. Importovat ji znovu jako další skupinu?`))) return;
         const id = user ? crypto.randomUUID() : uid();
-        setGroups((gs) => [...gs, { ...g, id, mu: Date.now() }]);
+        setGroups((gs) => [...gs, logged({ ...g, id, mu: Date.now() }, 'import', `skupina importována ze Settle Up (${plural(imported, 'záznam', 'záznamy', 'záznamů')})`)]);
         setGid(id);
         if (skipped) notify(`Načteno ${imported} záznamů. ${skipped} řádků se nepodařilo přečíst a bylo přeskočeno.`);
       } catch (e) {
@@ -2303,7 +2526,7 @@ function App({ user, recovery }) {
       const members = data.members.map((m) => ({ ...m, uid: group.members.find((x) => x.id === m.id)?.uid }));
       for (const m of group.members) if (m.uid && !members.some((x) => x.id === m.id)) members.push(m);
       putGroup(withMe({
-        ...group, name: data.name, emoji: data.emoji, color: data.color, members, dead, mu: now,
+        ...logged(group, 'restore', `skupina obnovena ze zálohy (${label})`), name: data.name, emoji: data.emoji, color: data.color, members, dead, mu: now,
         entries: data.entries.map((e) => ({ ...e, u: now })),
       }));
     } catch {
@@ -2375,6 +2598,8 @@ function App({ user, recovery }) {
             onEntry=${(entry) => setSheet({ type: 'entry', entry })}
             onSearch=${() => setSheet({ type: 'search' })}
             onDelete=${(entry) => deleteEntry(entry.id)}
+            onAll=${() => { allKeep.current = null; setSheet({ type: 'entries' }); }}
+            onLog=${() => setSheet({ type: 'log' })}
             onQr=${openQr}
             onMove=${groups.length > 1 ? (pay) => setSheet({ type: 'move', pay }) : null}
             onPay=${payDebt} />`
@@ -2383,7 +2608,7 @@ function App({ user, recovery }) {
       </div>
 
 <nav class="tabbar" aria-label="Hlavní nabídka">
-        <button class=${!group && !sheet ? 'on' : ''} onClick=${() => { close(); setGid(null); }}><${Icon} name="home" /><span>Skupiny</span></button>
+        <button class=${!group && !sheet ? 'on' : ''} onClick=${() => { setSheet(null); setGid(null); }}><${Icon} name="home" /><span>Skupiny</span></button>
         <button class=${sheet?.type === 'search' ? 'on' : ''} onClick=${() => setSheet({ type: 'search', all: !group })}><${Icon} name="search" /><span>Hledat</span></button>
         <button class="add" aria-label=${group ? 'Přidat záznam' : 'Nová skupina'} onClick=${() => setSheet(group ? { type: 'entry' } : { type: 'group' })}>
           <span class="plus"><${Icon} name="plus" size=${26} /></span><span>${group ? 'Záznam' : 'Skupina'}</span>
@@ -2404,6 +2629,16 @@ function App({ user, recovery }) {
             ? html`<${MovedInfo} group=${group} entry=${sheet.entry} other=${groups.find((g) => g.id === sheet.entry.mvg)}
                 onDelete=${() => deleteEntry(sheet.entry.id)} />`
             : html`<${EntryForm} group=${group} entry=${sheet.entry} onSave=${saveEntry} onDelete=${() => deleteEntry(sheet.entry.id)} />`}
+        <//>`}
+      ${sheet?.type === 'entries' && group && html`
+        <${Sheet} title="Všechny záznamy" onClose=${() => setSheet(null)}>
+          <${AllEntries} group=${group} keep=${allKeep}
+            onEntry=${(entry) => setSheet({ type: 'entry', entry, back: 'entries' })}
+            onDelete=${(entry) => deleteEntry(entry.id)} />
+        <//>`}
+      ${sheet?.type === 'log' && group && html`
+        <${Sheet} title="Historie úprav" onClose=${close}>
+          <${LogSheet} group=${group} />
         <//>`}
       ${sheet?.type === 'alldebts' && html`
         <${Sheet} title="Moje dluhy" onClose=${close}>
@@ -2537,4 +2772,13 @@ for (const type of ['gesturestart', 'gesturechange', 'gestureend']) {
 
 if ('serviceWorker' in navigator && !['localhost', '127.0.0.1'].includes(location.hostname)) {
   navigator.serviceWorker.register('./sw.js').catch(() => {});
+  // Na pozadí se stáhla novější verze aplikace: nabídneme ji malým nenápadným tlačítkem.
+  navigator.serviceWorker.addEventListener('message', (e) => {
+    if (e.data?.type !== 'updated' || document.querySelector('.update-bar')) return;
+    const b = document.createElement('button');
+    b.className = 'update-bar';
+    b.textContent = 'Je tu nová verze · Načíst';
+    b.onclick = () => location.reload();
+    document.body.appendChild(b);
+  });
 }

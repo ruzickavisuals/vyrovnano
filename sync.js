@@ -29,7 +29,7 @@ async function rpc(fn, body = {}) {
 // Část skupiny, která se sdílí se členy.
 export const shared = (g) => ({
   name: g.name, emoji: g.emoji, color: g.color, currency: g.currency, members: g.members,
-  entries: g.entries, dead: g.dead || {}, mu: g.mu || 0,
+  entries: g.entries, dead: g.dead || {}, mu: g.mu || 0, log: g.log || [],
 });
 
 // Stabilní textová podoba pro porovnání (databáze si pořadí klíčů přeskládá).
@@ -39,6 +39,17 @@ export function canon(v) {
     return '{' + Object.keys(v).sort().filter((k) => v[k] !== undefined).map((k) => JSON.stringify(k) + ':' + canon(v[k])).join(',') + '}';
   }
   return JSON.stringify(v);
+}
+
+// Historie úprav: kdo, kdy a co ve skupině udělal. Jen se do ní přidává; držíme posledních LOG_MAX záznamů.
+export const LOG_MAX = 300;
+const LOG_ACTS = ['add', 'edit', 'del', 'pay', 'move', 'unmove', 'join', 'group', 'restore', 'import'];
+const logOrder = (x, y) => x.t - y.t || (x.id < y.id ? -1 : x.id > y.id ? 1 : 0);
+// Sjednocení dvou historií podle id (stejný záznam z obou zařízení se nezdvojí), seřazené podle času.
+export function mergeLog(a = [], b = []) {
+  const byId = new Map();
+  for (const l of [...a, ...b]) if (!byId.has(l.id)) byId.set(l.id, l);
+  return [...byId.values()].sort(logOrder).slice(-LOG_MAX);
 }
 
 // Sloučí dvě verze skupiny tak, aby se neztratila změna z žádného zařízení:
@@ -64,7 +75,8 @@ export function merge(a, b) {
   for (const m of other.members) {
     if (used.has(m.id) && !members.some((x) => x.id === m.id)) members.push(m);
   }
-  return { name: meta.name, emoji: meta.emoji, color: meta.color, currency: meta.currency, members, entries, dead, mu: meta.mu || 0 };
+  return { name: meta.name, emoji: meta.emoji, color: meta.color, currency: meta.currency, members, entries, dead, mu: meta.mu || 0,
+    log: mergeLog(a.log, b.log) };
 }
 
 // Data ze serveru mohl upravit kterýkoli člen skupiny, proto jim nevěříme naslepo:
@@ -111,12 +123,24 @@ export function sanitize(d) {
   if (d.dead && typeof d.dead === 'object') {
     for (const [k, v] of Object.entries(d.dead).slice(0, 5000)) if (okId(k) && Number.isFinite(v)) dead[k] = v;
   }
+  const seen = new Set();
+  const log = (Array.isArray(d.log) ? d.log : [])
+    .filter((l) => l && okId(l.id) && Number.isFinite(l.t) && l.t > 0 && !seen.has(l.id) && seen.add(l.id))
+    .map((l) => ({ id: l.id, t: Math.round(l.t), by: okId(l.by) ? l.by : undefined, n: str(l.n, 60),
+      a: LOG_ACTS.includes(l.a) ? l.a : 'edit', text: str(l.text, 300) }))
+    .sort(logOrder).slice(-LOG_MAX);
   return { name: str(d.name, 80) || 'Skupina', emoji: str(d.emoji, 16) || '👥',
-    color: GROUP_COLORS.includes(d.color) ? d.color : undefined, currency: cur(d.currency), members, entries, dead, mu: num(d.mu) };
+    color: GROUP_COLORS.includes(d.color) ? d.color : undefined, currency: cur(d.currency), members, entries, dead, mu: num(d.mu), log };
 }
 
 // Otisk sdílené části skupiny – podle něj poznáme, jestli je co synchronizovat.
-export const sig = (g) => canon(sanitize(shared(g)));
+// Skupiny se při změně nahrazují novým objektem, takže si otisk pro daný objekt stačí spočítat jednou.
+const sigCache = new WeakMap();
+export const sig = (g) => {
+  let s = sigCache.get(g);
+  if (s === undefined) sigCache.set(g, (s = canon(sanitize(shared(g)))));
+  return s;
+};
 
 const fromRow = (row) => ({
   id: okUuid(row.id), version: num(row.version), data: sanitize(row.data),
@@ -135,6 +159,11 @@ export async function joinRemote(token) {
   const rows = await rpc('join_group', { p_token: token });
   const row = Array.isArray(rows) && rows[0] ? fromRow(rows[0]) : null;
   return row && row.id ? row : null;
+}
+// Jen číslo verze skupiny – levný dotaz, jestli se na serveru něco změnilo (null = nemám přístup).
+export async function remoteVersion(gid) {
+  const v = await rpc('group_version', { p_gid: gid });
+  return Number.isInteger(v) ? v : null;
 }
 export const leaveRemote = (gid) => rpc('leave_group', { p_gid: gid });
 export const resetInvite = (gid) => rpc('reset_invite', { p_gid: gid });
@@ -170,12 +199,12 @@ export async function syncGroup(g) {
     if (!row && g.remote) return { gone: true };
     const local = sanitize(shared(g));
     const merged = row ? merge(local, row.data) : local;
-    if (row && canon(merged) === canon(row.data)) return { data: merged, invite: row.invite, owner: row.owner };
+    if (row && canon(merged) === canon(row.data)) return { data: merged, invite: row.invite, owner: row.owner, version: row.version };
     const v = await rpc('save_group', { p_gid: g.id, p_data: merged, p_expected: row ? row.version : 0 });
     if (v > 0) {
-      if (row) return { data: merged, invite: row.invite, owner: row.owner };
+      if (row) return { data: merged, invite: row.invite, owner: row.owner, version: v };
       const created = await fetchRemote(g.id);
-      return { data: merged, invite: created?.invite || '', owner: true };
+      return { data: merged, invite: created?.invite || '', owner: true, version: created?.version ?? v };
     }
     // Někdo mezitím uložil novější verzi – zkusíme to znovu s jeho změnami.
   }

@@ -451,6 +451,18 @@ end;
 $$;
 revoke execute on function public.backup_groups() from public, anon, authenticated;
 
+-- Jen číslo verze skupiny (pro člena): levná kontrola, jestli se něco změnilo.
+create or replace function public.group_version(p_gid uuid)
+returns integer
+language sql stable security definer set search_path = ''
+as $$
+  select g.version from public.groups g
+  join public.group_members m on m.group_id = g.id
+  where g.id = p_gid and m.user_id = public.uid();
+$$;
+revoke execute on function public.group_version(uuid) from public, anon;
+grant execute on function public.group_version(uuid) to authenticated;
+
 -- Seznam záloh skupiny (jen pro člena).
 create or replace function public.list_backups(p_gid uuid)
 returns table (taken_at timestamptz, entries integer)
