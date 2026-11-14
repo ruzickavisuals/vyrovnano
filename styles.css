@@ -173,3 +173,9 @@ input.mini { width: 110px !important; text-align: right; padding: 7px 10px !impo
 .divider { text-align: center; color: var(--muted); font-size: 13px; }
 hr { border: 0; border-top: 1px solid var(--line); width: 100%; margin: 4px 0; }
 .btn.link { background: transparent; color: var(--muted); }
+
+/* Textové stránky */
+.doc { gap: 10px; line-height: 1.55; }
+.doc h2 { font-size: 17px; margin-top: 10px; }
+.doc ul { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 6px; }
+a { color: var(--accent); }

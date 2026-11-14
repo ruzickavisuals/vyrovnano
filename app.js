@@ -759,7 +759,7 @@ function AuthScreen({ notice }) {
           <div class="divider">nebo</div>
           <button class="btn wide" onClick=${signInWithGoogle}>Pokračovat přes Google</button>
         `}
-        <p class="hint center">Tvoje skupiny vidí jen lidé, které do nich pozveš.</p>
+        <p class="hint center">Tvoje skupiny vidí jen lidé, které do nich pozveš. <a href="privacy.html">Zásady ochrany soukromí</a></p>
       </main>
     </div>
   `;
