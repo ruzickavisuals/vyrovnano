@@ -368,7 +368,7 @@ function Home({ groups, profile, account, activeId, onOpen, onNew, onProfile, on
 
 /* ---------- Detail skupiny ---------- */
 
-function GroupView({ group, onBack, onEdit, onShare, onEntry, onAdd, onPay, onQr }) {
+function GroupView({ group, onBack, onEdit, onShare, onEntry, onAdd, onPay, onQr, onMove }) {
   const [tab, setTab] = useState('entries');
   const bal = useMemo(() => balances(group), [group]);
   const st = useMemo(() => stats(group), [group]);
@@ -420,7 +420,7 @@ function GroupView({ group, onBack, onEdit, onShare, onEntry, onAdd, onPay, onQr
       </section>
       <div class="col-right" ref=${colRef}>
       <section class=${'panel p-debts' + (tab === 'debts' ? ' on' : '')}>
-        <${Debts} group=${group} bal=${bal} onPay=${onPay} onQr=${onQr} />
+        <${Debts} group=${group} bal=${bal} onPay=${onPay} onQr=${onQr} onMove=${onMove} />
       </section>
       <section class=${'panel p-stats' + (tab === 'stats' ? ' on' : '')}>
         <${Stats} group=${group} st=${st} />
@@ -454,7 +454,9 @@ function Entries({ group, onEntry }) {
               <span class="avatar sm">💱</span>
               <span class="grow">
                 <strong>${nameOf(group, e.paidBy)} → ${nameOf(group, to)}</strong>
-                <small><span class="paid-tag">uhrazeno</span></small>
+                <small>${!e.title || e.title === 'Převod' || /vyrovn|uhra[zd]/i.test(e.title)
+                  ? html`<span class="paid-tag">uhrazeno</span>`
+                  : html`<span class="muted">${e.title}</span>`}</small>
               </span>
               <span class="right"><strong>${fmt(e.amount, e.currency)}</strong></span>
             </button>
@@ -480,7 +482,7 @@ function Entries({ group, onEntry }) {
   `);
 }
 
-function Debts({ group, bal, onPay, onQr }) {
+function Debts({ group, bal, onPay, onQr, onMove }) {
   const cur = group.currency;
   const plan = settle(bal);
   const max = Math.max(1, ...Object.values(bal).map(Math.abs));
@@ -504,6 +506,7 @@ function Debts({ group, bal, onPay, onQr }) {
                   <button class="btn small" onClick=${() => onQr({ ...p, iban })}>QR platba</button>
                   <button class="btn small due" onClick=${() => onPay(p)}>Uhradit</button>
                 </div>
+                ${onMove && html`<button class="link-btn pay-move" onClick=${() => onMove(p)}>Převést dluh do jiné skupiny</button>`}
               </div>
             `;
           })}
@@ -934,6 +937,49 @@ function WhoSheet({ group, profile, known, onPick }) {
   `;
 }
 
+/* ---------- Převod dluhu do jiné skupiny ---------- */
+
+// Najde ve skupině člena odpovídajícího danému členovi jiné skupiny: nejdřív podle
+// propojeného účtu, jinak podle jména. Vrací null, když si není jistý (žádná nebo víc shod).
+function matchMember(target, src) {
+  if (src.uid) {
+    const byUid = target.members.find((m) => m.uid === src.uid);
+    if (byUid) return byUid;
+  }
+  const byName = target.members.filter((m) => !m.inactive && sameName(m.name, src.name));
+  return byName.length === 1 ? byName[0] : null;
+}
+
+function MoveSheet({ group, groups, pay, onMove }) {
+  const from = group.members.find((m) => m.id === pay.from);
+  const to = group.members.find((m) => m.id === pay.to);
+  const options = groups.filter((g) => g.id !== group.id).map((g) => {
+    const f = matchMember(g, from), t = matchMember(g, to);
+    const why = g.currency !== group.currency ? `jiná měna (${g.currency})`
+      : !f ? `chybí ${from.name}` : !t ? `chybí ${to.name}` : f.id === t.id ? 'nejde rozlišit členy' : '';
+    return { g, f, t, why };
+  });
+  return html`
+    <div class="form">
+      <p><strong>${from.name}</strong> dluží <strong>${to.name}</strong> <strong class="neg">${fmt(pay.amount, group.currency)}</strong>.
+        Vyber skupinu, kam se má tento dluh přesunout.</p>
+      ${options.length === 0 && html`<p class="muted">Nemáš žádnou další skupinu.</p>`}
+      <div class="card list">
+        ${options.map(({ g, f, t, why }) => html`
+          <button class="item" disabled=${!!why} onClick=${() => onMove(g, f, t)}>
+            <span class="avatar sm">${g.emoji}</span>
+            <span class="grow">
+              <strong>${g.name}</strong>
+              <small class="muted">${why ? `Nelze: ${why}` : `${f.name} bude dlužit ${t.name}`}</small>
+            </span>
+          </button>
+        `)}
+      </div>
+      <p class="hint">Tady se dluh označí jako převedený a zmizí. V cílové skupině se stejná částka připočte k tomu, co si tam ti dva dluží. Obě změny jsou vidět v historii a dají se smazat.</p>
+    </div>
+  `;
+}
+
 /* ---------- Zálohy ---------- */
 
 function downloadFile(name, text) {
@@ -1279,6 +1325,20 @@ function App({ user, recovery }) {
       paidBy: p.from, mode: 'equal', parts: { [p.to]: 1 }, category: 'other', date: today(),
     });
   }
+  // Převod dluhu: tady vznikne převod, který dluh vyrovná, a v cílové skupině opačný převod,
+  // který tam stejný dluh založí. Do statistik útraty se ani jeden nepočítá.
+  async function moveDebt(pay, target, f, t) {
+    const amount = fmt(pay.amount, group.currency);
+    if (!(await ask(`Převést dluh ${amount} (${nameOf(group, pay.from)} → ${nameOf(group, pay.to)}) do skupiny „${target.name}“? Tady zmizí a tam se připočte.`, { ok: 'Převést' }))) return;
+    const now = Date.now();
+    const base = { kind: 'transfer', amount: pay.amount, rate: 1, mode: 'equal', category: 'other', date: today(), u: now };
+    const out = { ...base, id: uid(), currency: group.currency, title: `Převedeno do skupiny „${target.name}“`.slice(0, 120), paidBy: pay.from, parts: { [pay.to]: 1 } };
+    const inn = { ...base, id: uid(), currency: target.currency, title: `Převedeno ze skupiny „${group.name}“`.slice(0, 120), paidBy: t.id, parts: { [f.id]: 1 } };
+    setGroups((gs) => gs.map((g) => (
+      g.id === group.id ? { ...g, entries: [...g.entries, out] }
+      : g.id === target.id ? { ...g, entries: [...g.entries, inn] } : g)));
+    close();
+  }
   function openQr(pay) {
     if (!pay.iban) {
       return notify(`${nameOf(group, pay.to)} nemá vyplněné číslo účtu, takže QR platbu nejde vytvořit. Číslo účtu si každý doplní sám v nastavení skupiny (ikona ozubeného kola).`);
@@ -1428,6 +1488,7 @@ function App({ user, recovery }) {
             onAdd=${() => setSheet({ type: 'entry' })}
             onEntry=${(entry) => setSheet({ type: 'entry', entry })}
             onQr=${openQr}
+            onMove=${groups.length > 1 ? (pay) => setSheet({ type: 'move', pay }) : null}
             onPay=${payDebt} />`
             : html`<div class="placeholder"><div class="big">🧾</div>
                 <p>${groups.length ? 'Vyber skupinu ze seznamu vlevo.' : 'Začni vytvořením skupiny nebo importem ze Settle Up.'}</p></div>`}
@@ -1443,6 +1504,10 @@ function App({ user, recovery }) {
       ${sheet?.type === 'entry' && group && html`
         <${Sheet} title=${sheet.entry ? 'Upravit záznam' : 'Nový záznam'} onClose=${close}>
           <${EntryForm} group=${group} entry=${sheet.entry} onSave=${saveEntry} onDelete=${() => deleteEntry(sheet.entry.id)} />
+        <//>`}
+      ${sheet?.type === 'move' && group && html`
+        <${Sheet} title="Převést dluh" onClose=${close}>
+          <${MoveSheet} group=${group} groups=${groups} pay=${sheet.pay} onMove=${(g, f, t) => moveDebt(sheet.pay, g, f, t)} />
         <//>`}
       ${sheet?.type === 'qr' && group && html`
         <${Sheet} title="QR platba" onClose=${close}>

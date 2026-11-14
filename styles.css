@@ -442,3 +442,7 @@ input.emoji-search { margin-bottom: 8px; padding: 9px 12px !important; }
 .logo img { height: 38px; width: auto; display: block; }
 .auth .top { padding-top: calc(env(safe-area-inset-top) + 36px); padding-bottom: 20px; }
 .auth .logo img { height: 46px; }
+
+/* Převod dluhu do jiné skupiny */
+.pay-move { grid-column: 1 / -1; justify-self: center; padding: 2px 8px; }
+.item:disabled { opacity: 0.5; cursor: not-allowed; }
