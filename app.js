@@ -1,11 +1,11 @@
-import { html, render, useState, useEffect, useMemo, useRef } from './vendor/preact-htm.js';
+import { html, render, useState, useEffect, useLayoutEffect, useMemo, useRef } from './vendor/preact-htm.js';
 import {
   CATS, cat, catOf, guessCategory, CURRENCIES, uid, today, fmt, parseAmount, allocate, baseAmount, shares,
   balances, settle, stats, debtMove, vocative, toIban, spayd, dateLabel, seed,
 } from './logic.js';
 import {
   syncEnabled, shared, canon, merge, sanitize, sig, listRemote, joinRemote, leaveRemote,
-  resetInvite, kickRemote, deleteAccount, groupUserIds, syncGroup, listBackups, getBackup, isAdmin, savePushSub, deletePushSub,
+  resetInvite, kickRemote, deleteAccount, groupUserIds, syncGroup, listBackups, getBackup, isAdmin, savePushSub, deletePushSub, getNotifyPrefs, setNotifyPrefs,
 } from './sync.js';
 import {
   getSession, onAuthChange, signUp, signIn, signInWithGoogle, sendPasswordReset,
@@ -77,6 +77,65 @@ const ICONS = {
 function Icon({ name, size = 22 }) {
   return html`<svg class="ic" width=${size} height=${size} viewBox="0 0 24 24" fill="none" stroke="currentColor"
     stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d=${ICONS[name]} /></svg>`;
+}
+
+/* ---------- Drobné animace ---------- */
+
+const calm = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+// Místo posledního klepnutí – odtud vyletí konfety.
+let lastTap = { x: innerWidth / 2, y: innerHeight / 2 };
+document.addEventListener('pointerdown', (e) => { lastTap = { x: e.clientX, y: e.clientY }; }, { passive: true, capture: true });
+
+// Krátký výbuch konfet v barvách aplikace (asi vteřina, bez zvuku). Použije se při úhradě dluhu.
+function celebrate() {
+  if (calm()) return;
+  const css = getComputedStyle(document.documentElement);
+  const colors = [css.getPropertyValue('--accent').trim(), css.getPropertyValue('--pos').trim(), '#fbbf24', '#60a5fa', '#f472b6'];
+  const layer = document.createElement('div');
+  layer.className = 'confetti';
+  document.body.appendChild(layer);
+  for (let i = 0; i < 36; i++) {
+    const p = document.createElement('i');
+    const angle = Math.random() * Math.PI * 2;
+    const dist = 60 + Math.random() * 150;
+    const dx = Math.cos(angle) * dist, dy = Math.sin(angle) * dist - 70;
+    const size = 5 + Math.random() * 6;
+    p.style.cssText = `left:${lastTap.x}px;top:${lastTap.y}px;width:${size}px;height:${size * (Math.random() < 0.5 ? 1 : 0.45)}px;` +
+      `background:${colors[i % colors.length]};border-radius:${Math.random() < 0.4 ? '50%' : '2px'}`;
+    layer.appendChild(p);
+    p.animate([
+      { transform: 'translate3d(0,0,0) rotate(0deg) scale(0.4)', opacity: 1 },
+      { transform: `translate3d(${dx}px,${dy}px,0) rotate(${Math.random() * 540 - 270}deg) scale(1)`, opacity: 1, offset: 0.55 },
+      { transform: `translate3d(${dx * 1.15}px,${dy + 100}px,0) rotate(${Math.random() * 720 - 360}deg) scale(0.9)`, opacity: 0 },
+    ], { duration: 850 + Math.random() * 400, easing: 'cubic-bezier(0.16, 0.8, 0.3, 1)', fill: 'forwards' });
+  }
+  setTimeout(() => layer.remove(), 1500);
+}
+
+// Částka, která při změně plynule „doběhne“ na novou hodnotu.
+function CountUp({ value, format }) {
+  const el = useRef();
+  const prev = useRef(0);
+  useLayoutEffect(() => {
+    const from = prev.current, to = value;
+    prev.current = value;
+    if (from === to || calm() || document.hidden) { el.current.textContent = format(to); return; }
+    const t0 = performance.now();
+    let raf;
+    el.current.textContent = format(Math.round(from / 100) * 100);
+    const step = (t) => {
+      const p = Math.min(1, (t - t0) / 650);
+      const eased = 1 - Math.pow(1 - p, 3);
+      el.current.textContent = p < 1 ? format(Math.round((from + (to - from) * eased) / 100) * 100) : format(to);
+      if (p < 1) raf = requestAnimationFrame(step);
+    };
+    raf = requestAnimationFrame(step);
+    // Pojistka: kdyby prohlížeč animaci pozastavil, částka stejně skončí správně.
+    const safety = setTimeout(() => { if (el.current) el.current.textContent = format(to); }, 900);
+    return () => { cancelAnimationFrame(raf); clearTimeout(safety); };
+  }, [value]);
+  return html`<span ref=${el}></span>`;
 }
 
 /* ---------- Drobné stavební prvky ---------- */
@@ -647,11 +706,12 @@ function GroupView({ group, onBack, onEdit, onShare, onEntry, onAdd, onPay, onQr
       <div class="hero">
         <div>
           <small>${st.total < 0 ? 'Čistý příjem skupiny' : 'Celkem utraceno'}</small>
-          <strong>${fmt(Math.abs(st.total), cur)}</strong>
+          <strong><${CountUp} value=${Math.abs(st.total)} format=${(v) => fmt(v, cur)} /></strong>
         </div>
         <div class="right">
           <small>${my > 0 ? 'Dostaneš zpět' : my < 0 ? 'Dlužíš' : 'Tvůj stav'}</small>
-          <strong class=${my > 0 ? 'pos' : my < 0 ? 'neg' : ''}>${my ? fmt(Math.abs(my), cur) : 'Vyrovnáno ✓'}</strong>
+          <strong class=${my > 0 ? 'pos' : my < 0 ? 'neg' : ''}>${my
+            ? html`<${CountUp} value=${Math.abs(my)} format=${(v) => fmt(v, cur)} />` : 'Vyrovnáno ✓'}</strong>
         </div>
       </div>
       <div class="tabs"><${Seg} value=${tab} onChange=${setTab} options=${[['entries', 'Výdaje'], ['debts', 'Dluhy'], ['stats', 'Přehled']]} /></div>
@@ -1500,7 +1560,14 @@ function PushSettings() {
   const [state, setState] = useState('loading'); // loading | unsupported | denied | on | off
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
+  // Co má chodit: platí pro účet (všechna jeho zařízení) a filtruje to server.
+  const [prefs, setPrefs] = useState({ scope: 'mine', types: {} });
   useEffect(() => { pushState().then(setState).catch(() => setState('unsupported')); }, []);
+  useEffect(() => {
+    getNotifyPrefs().then((p) => setPrefs({ scope: p?.scope === 'all' ? 'all' : 'mine', types: p?.types || {} })).catch(() => {});
+  }, []);
+  const change = (next) => { setPrefs(next); setNotifyPrefs(next).catch(() => setMsg('Volbu se nepodařilo uložit. Zkus to prosím znovu.')); };
+  const KINDS = [['entry', 'Nové a upravené výdaje'], ['deleted', 'Smazané záznamy'], ['paid', 'Úhrady a převody dluhů'], ['joined', 'Noví členové skupiny']];
   async function toggle() {
     setBusy(true);
     setMsg('');
@@ -1532,6 +1599,22 @@ function PushSettings() {
             </button>
           </div>
           <p class="hint">${msg || 'Dostaneš zprávu, když někdo ve tvé skupině přidá, upraví nebo smaže výdaj, uhradí dluh nebo se připojí. Vlastní změny ti nechodí.'}</p>
+          <div class="field">
+            <span>Co mi má chodit</span>
+            <${Seg} value=${prefs.scope} onChange=${(scope) => change({ ...prefs, scope })}
+              options=${[['mine', 'Jen co se mě týká'], ['all', 'Všechno ve skupinách']]} />
+          </div>
+          <p class="hint">${prefs.scope === 'mine'
+            ? 'Přijde ti jen to, kde figuruješ: výdaj, který platíš nebo se na něm podílíš, a úhrady, kde jsi plátce nebo příjemce.'
+            : 'Přijde ti každá změna ve tvých skupinách, i mezi ostatními členy.'}</p>
+          <div class="checks">
+            ${KINDS.map(([id, label]) => html`
+              <label class="check">
+                <input type="checkbox" checked=${prefs.types[id] !== false}
+                  onChange=${(e) => change({ ...prefs, types: { ...prefs.types, [id]: e.target.checked } })} />
+                <span>${label}</span>
+              </label>`)}
+          </div>
           ${state === 'on' && html`<button class="btn wide" disabled=${busy} onClick=${async () => {
             setBusy(true);
             try {
@@ -1622,7 +1705,6 @@ function ProfileSheet({ profile, user, admin, groupCount, onSave, onLogout, onDe
             ${admin && html`<dt>Role</dt><dd>správce aplikace</dd>`}
           </dl>
           ${user.provider === 'email' && html`<${PasswordForm} />`}
-          <button class="btn wide" onClick=${onLogout}>Odhlásit se</button>
         </section>`}
 
       <section class="card set-card">
@@ -1633,6 +1715,11 @@ function ProfileSheet({ profile, user, admin, groupCount, onSave, onLogout, onDe
       </section>
 
       ${user && html`
+        <section class="card set-card">
+          <h3>Odhlášení</h3>
+          <p class="hint">Jsi přihlášen jako ${user.email}. Po odhlášení se můžeš přihlásit k jinému účtu. Tvoje skupiny zůstanou uložené a po dalším přihlášení je tu zase najdeš.</p>
+          <button class="btn primary wide" onClick=${onLogout}>Odhlásit se</button>
+        </section>
         <section class="card set-card">
           <h3>Smazání účtu</h3>
           <p class="hint">Skupiny, kde jsi jediný, zmizí. Ve sdílených skupinách zůstanou tvoje výdaje ostatním. Nejde to vrátit.</p>
@@ -1729,10 +1816,13 @@ function App({ user, recovery }) {
   const synced = useRef({});
   // Zprávy pro ostatní členy čekají, až se změna uloží na server; pak se odešlou jako notifikace.
   const outbox = useRef({});
-  const announce = (g, text) => {
+  // type: entry | deleted | paid | joined. memberIds = členové, kterých se změna přímo týká;
+  // podle toho server pozná, komu ji poslat, když má někdo zapnuté „jen co se mě týká“.
+  const announce = (g, text, type = 'entry', memberIds = []) => {
     if (!user || !g) return;
     const who = g.members.find((m) => m.id === g.me)?.name || prof.name || 'Někdo';
-    (outbox.current[g.id] = outbox.current[g.id] || { name: g.name, items: [] }).items.push(`${who}: ${text}`);
+    const involved = [...new Set(memberIds.map((id) => g.members.find((m) => m.id === id)?.uid).filter(Boolean))];
+    (outbox.current[g.id] = outbox.current[g.id] || { name: g.name, items: [] }).items.push({ text: `${who}: ${text}`, type, involved });
   };
   const leaving = useRef(false);
 
@@ -1845,7 +1935,7 @@ function App({ user, recovery }) {
         const box = outbox.current[id];
         if (box) {
           delete outbox.current[id];
-          notifyGroup(id, box.name, box.items.length === 1 ? box.items[0] : `${box.items[0]} (a další změny: ${box.items.length - 1})`);
+          for (const it of box.items.slice(0, 6)) notifyGroup(id, box.name, it.text, it.type, it.involved);
         }
         // Sloučíme znovu s aktuálním stavem, kdyby uživatel mezitím něco změnil.
         setGroups((gs) => {
@@ -1955,11 +2045,12 @@ function App({ user, recovery }) {
     }
     putGroup(out);
   }
-  const saveEntry = (e, note) => {
+  const saveEntry = (e, note, type = 'entry') => {
     const entry = { ...e, u: Date.now() };
     const has = group.entries.some((x) => x.id === e.id);
     const what = e.kind === 'transfer' ? 'převod' : e.kind === 'income' ? 'příjem' : 'výdaj';
-    announce(group, note || `${has ? 'upraven' : 'nový'} ${what} „${e.title}“ (${fmt(e.amount, e.currency)})`);
+    announce(group, note || `${has ? 'upraven' : 'nový'} ${what} „${e.title}“ (${fmt(e.amount, e.currency)})`,
+      e.kind === 'transfer' ? 'paid' : type, [e.paidBy, ...Object.keys(e.parts)]);
     putGroup({ ...group, entries: has ? group.entries.map((x) => (x.id === e.id ? entry : x)) : [...group.entries, entry] });
   };
   // Mazání a zápis platby jsou špatně vratné, proto se vždy ptáme.
@@ -1977,19 +2068,20 @@ function App({ user, recovery }) {
       }
       const where = e.mvd === 'in' ? `vrátí do skupiny „${other.name}“` : `vrátí sem ze skupiny „${other.name}“`;
       if (!(await ask(`Zrušit převod dluhu ${fmt(e.amount, e.currency)}? Smaže se v obou skupinách a dluh se ${where}.`, { ok: 'Zrušit převod' }))) return;
-      announce(group, `zrušen převod dluhu ${fmt(e.amount, e.currency)}`);
-      if (twin) announce(other, `zrušen převod dluhu ${fmt(e.amount, e.currency)}`);
+      announce(group, `zrušen převod dluhu ${fmt(e.amount, e.currency)}`, 'deleted', [e.paidBy, ...Object.keys(e.parts)]);
+      if (twin) announce(other, `zrušen převod dluhu ${fmt(e.amount, e.currency)}`, 'deleted', [twin.paidBy, ...Object.keys(twin.parts)]);
       setGroups((gs) => gs.map((g) => (
         g.id === group.id ? drop(g, e.id) : twin && g.id === other.id ? drop(g, twin.id) : g)));
       return close();
     }
     if (!(await ask(`Opravdu smazat záznam „${e.title || 'Převod'}“ (${fmt(e.amount, e.currency)})? Zmizí všem členům skupiny.`, { ok: 'Smazat' }))) return;
-    announce(group, `smazán záznam „${e.title || 'Převod'}“ (${fmt(e.amount, e.currency)})`);
+    announce(group, `smazán záznam „${e.title || 'Převod'}“ (${fmt(e.amount, e.currency)})`, 'deleted', [e.paidBy, ...Object.keys(e.parts)]);
     putGroup(drop(group, id));
   }
   async function payDebt(p) {
     const msg = `Označit dluh jako uhrazený? ${nameOf(group, p.from)} → ${nameOf(group, p.to)}, ${fmt(p.amount, group.currency)}. Peníze tím nikam neodejdou, jen se platba zapíše do historie a dluh zmizí všem členům.`;
     if (!(await ask(msg, { ok: 'Uhrazeno' }))) return;
+    celebrate();
     saveEntry({
       id: uid(), kind: 'transfer', title: 'Převod', amount: p.amount, currency: group.currency, rate: 1,
       paidBy: p.from, mode: 'equal', parts: { [p.to]: 1 }, category: 'other', date: today(),
@@ -2002,8 +2094,8 @@ function App({ user, recovery }) {
     const msg = `Převést dluh ${amount} do skupiny „${target.name}“? ${nameOf(group, pay.from)} bude dál dlužit ${nameOf(group, pay.to)}, jen v jiné skupině: tady dluh zmizí a tam se připočte.`;
     if (!(await ask(msg, { ok: 'Převést' }))) return;
     const pair = debtMove(group, target, pay, f, t);
-    announce(group, `dluh ${amount} (${nameOf(group, pay.from)} → ${nameOf(group, pay.to)}) převeden do skupiny „${target.name}“`);
-    announce(target, `dluh ${amount} (${f.name} → ${t.name}) převeden ze skupiny „${group.name}“`);
+    announce(group, `dluh ${amount} (${nameOf(group, pay.from)} → ${nameOf(group, pay.to)}) převeden do skupiny „${target.name}“`, 'paid', [pay.from, pay.to]);
+    announce(target, `dluh ${amount} (${f.name} → ${t.name}) převeden ze skupiny „${group.name}“`, 'paid', [f.id, t.id]);
     setGroups((gs) => gs.map((g) => (
       g.id === group.id ? { ...g, entries: [...g.entries, pair.out] }
       : g.id === target.id ? { ...g, entries: [...g.entries, pair.in] } : g)));
@@ -2021,7 +2113,7 @@ function App({ user, recovery }) {
     const mine = { uid: user?.id };
     const taken = id && group.members.find((m) => m.id === id)?.uid;
     if (taken && taken !== user?.id) return notify('Tohoto člena si mezitím vybral někdo jiný. Vyber prosím jiného.');
-    announce(group, `nový člen ve skupině (${id ? nameOf(group, id) : newName})`);
+    announce(group, `nový člen ve skupině (${id ? nameOf(group, id) : newName})`, 'joined');
     if (id) {
       putGroup({ ...group, mu: Date.now(), me: id,
         members: group.members.map((m) => (m.id === id ? { ...m, ...mine, avatar: m.avatar || profile.avatar, iban: m.iban || profile.iban || undefined } : m)) });
@@ -2136,7 +2228,11 @@ function App({ user, recovery }) {
   }
   async function logout(skipConfirm) {
     const dirty = groups.some((g) => sig(g) !== synced.current[g.id]);
-    if (!skipConfirm && dirty && !(await ask('Některé změny se ještě neodeslaly na server a odhlášením se ztratí. Opravdu se odhlásit?'))) return;
+    if (!skipConfirm && !(await ask(dirty
+      ? 'Některé změny se ještě neodeslaly na server a odhlášením se ztratí. Opravdu se odhlásit?'
+      : 'Odhlásit se z tohoto zařízení?', { ok: 'Odhlásit se' }))) return;
+    // Notifikace patří k účtu: po odhlášení už na tohle zařízení nemají chodit.
+    if (!skipConfirm) await disablePush(deletePushSub).catch(() => {});
     // Při odhlášení z tohoto zařízení mažeme i uložená data, ať je neuvidí další člověk u stejného telefonu.
     leaving.current = true;
     localStorage.removeItem(gkey);

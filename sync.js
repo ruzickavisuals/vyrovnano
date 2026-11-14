@@ -134,6 +134,8 @@ export const kickRemote = (gid, userId) => rpc('kick_member', { p_gid: gid, p_us
 export const deleteAccount = () => rpc('delete_account');
 export const isAdmin = () => rpc('is_admin');
 export const savePushSub = (endpoint, p256dh, auth) => rpc('save_push_subscription', { p_endpoint: endpoint, p_p256dh: p256dh, p_auth: auth });
+export const getNotifyPrefs = () => rpc('get_notify_prefs');
+export const setNotifyPrefs = (prefs) => rpc('set_notify_prefs', { p_prefs: prefs });
 export const deletePushSub = (endpoint) => rpc('delete_push_subscription', { p_endpoint: endpoint });
 export async function groupUserIds(gid) {
   const rows = await rpc('group_user_ids', { p_gid: gid });

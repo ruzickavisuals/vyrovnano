@@ -37,6 +37,18 @@ export default {
         if (error || !members?.length) return Response.json({ error: "forbidden" }, { status: 403 });
         others = (members as string[]).filter((id) => id !== me);
       }
+      if (body.test !== true) {
+        // Každý si volí, co mu má chodit. Výchozí je „jen co se mě týká“.
+        const type = String(body.type ?? "entry");
+        const involved: string[] = Array.isArray(body.involved) ? body.involved.map(String) : [];
+        const { data: prefs } = await admin.from("user_prefs").select("user_id,notify").in("user_id", others);
+        others = others.filter((id) => {
+          const p = (prefs ?? []).find((x) => x.user_id === id)?.notify ?? {};
+          if (p.types && p.types[type] === false) return false;
+          if ((p.scope ?? "mine") === "mine" && type !== "joined" && !involved.includes(id)) return false;
+          return true;
+        });
+      }
       if (!others.length) return Response.json({ sent: 0 });
 
       const { data: subs } = await admin.from("push_subscriptions").select("endpoint,p256dh,auth").in("user_id", others);

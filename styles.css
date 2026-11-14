@@ -691,3 +691,59 @@ mark { background: color-mix(in srgb, var(--accent) 28%, transparent); color: in
   .sheet { animation: none !important; }
   * { transition-duration: 0.01ms !important; }
 }
+
+/* Volby notifikací */
+.checks { display: flex; flex-direction: column; gap: 10px; }
+
+/* ---------- Drobné animace: krátké, tiché, jen přes transform a průhlednost ---------- */
+.confetti { position: fixed; inset: 0; z-index: 90; pointer-events: none; overflow: hidden; }
+.confetti i { position: absolute; display: block; will-change: transform, opacity; }
+
+@keyframes rise { from { opacity: 0; transform: translate3d(0, 10px, 0); } }
+@keyframes grow-x { from { transform: scaleX(0); } }
+@keyframes pop { 0% { transform: scale(0.94); opacity: 0; } 60% { transform: scale(1.02); opacity: 1; } 100% { transform: scale(1); } }
+@keyframes fade { from { opacity: 0; } }
+@keyframes float { 0%, 100% { transform: translate3d(0, 0, 0); } 50% { transform: translate3d(0, -5px, 0); } }
+
+/* Karty skupin a první řádky seznamů se objeví postupně. */
+.group-row { animation: rise 0.36s var(--ease) both; }
+.group-row:nth-child(2) { animation-delay: 0.04s; } .group-row:nth-child(3) { animation-delay: 0.08s; }
+.group-row:nth-child(4) { animation-delay: 0.12s; } .group-row:nth-child(5) { animation-delay: 0.16s; }
+.group-row:nth-child(n+6) { animation-delay: 0.2s; }
+.is-dragging .group-row { animation: none; }
+.panel > .day, .panel > .card, .hero { animation: rise 0.34s var(--ease) both; }
+.panel > :nth-child(3) { animation-delay: 0.03s; } .panel > :nth-child(4) { animation-delay: 0.06s; }
+.panel > :nth-child(5) { animation-delay: 0.09s; } .panel > :nth-child(6) { animation-delay: 0.12s; }
+.panel > :nth-child(n+7) { animation-delay: 0.14s; }
+
+/* Pruhy v přehledu a u zůstatků narostou ze strany. */
+.track i { transform-origin: left center; animation: grow-x 0.7s var(--ease) both; }
+.bal-bar i.p { transform-origin: left center; animation: grow-x 0.6s var(--ease) both; }
+.bal-bar i.n { transform-origin: right center; animation: grow-x 0.6s var(--ease) both; }
+
+/* Okna, dialogy a nabídky */
+.dialog { animation: pop 0.24s var(--ease); }
+.select-menu { animation: rise 0.16s var(--ease); }
+.settled { animation: pop 0.4s var(--ease); }
+.welcome .big, .welcome-emoji { display: inline-block; animation: float 4.5s ease-in-out infinite; }
+.welcome h2, .welcome-sum, .welcome-quip, .welcome-card { animation: rise 0.4s var(--ease) both; }
+.welcome-sum { animation-delay: 0.06s; } .welcome-quip { animation-delay: 0.12s; }
+
+/* Odezva na dotyk a najetí myší */
+.tabbar .plus .ic { transition: transform 0.25s var(--ease); }
+.tabbar .add:active .plus .ic { transform: rotate(90deg); }
+.tabbar button .ic { transition: transform 0.2s var(--ease); }
+.tabbar button.on .ic { transform: translate3d(0, -1px, 0) scale(1.08); }
+.seg button { transition: background-color 0.2s, color 0.2s, box-shadow 0.2s; }
+@media (hover: hover) {
+  .group-card { transition: transform 0.18s var(--ease), box-shadow 0.18s; }
+  .group-row:not(.dragging):hover .group-card { transform: translate3d(0, -2px, 0); box-shadow: 0 8px 22px rgb(0 0 0 / 0.22); }
+  .item { transition: background-color 0.15s; }
+  .item:not(.static):hover { background: color-mix(in srgb, var(--text) 4%, transparent); }
+  .swatch, .emoji-cell { transition: transform 0.15s var(--ease); }
+  .swatch:hover, .emoji-cell:hover { transform: scale(1.12); }
+}
+@media (max-width: 899px) { .panel.on { animation: fade 0.22s ease; } }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; animation-delay: 0s !important; }
+}

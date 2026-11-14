@@ -364,6 +364,37 @@ $$;
 revoke execute on function public.save_push_subscription(text, text, text), public.delete_push_subscription(text) from public, anon;
 grant execute on function public.save_push_subscription(text, text, text), public.delete_push_subscription(text) to authenticated;
 
+-- Volby notifikací (co komu má chodit). Čte je serverová funkce „notify“.
+create table if not exists public.user_prefs (
+  user_id uuid primary key references auth.users (id) on delete cascade,
+  notify jsonb not null default '{}'::jsonb
+);
+alter table public.user_prefs enable row level security;
+revoke all on public.user_prefs from anon, authenticated;
+
+create or replace function public.get_notify_prefs()
+returns jsonb
+language sql stable security definer set search_path = ''
+as $$
+  select coalesce((select p.notify from public.user_prefs p where p.user_id = auth.uid()), '{}'::jsonb);
+$$;
+
+create or replace function public.set_notify_prefs(p_prefs jsonb)
+returns void
+language plpgsql security definer set search_path = ''
+as $$
+declare me uuid := auth.uid();
+begin
+  if me is null then raise exception 'not signed in'; end if;
+  if jsonb_typeof(p_prefs) <> 'object' or pg_column_size(p_prefs) > 2000 then raise exception 'invalid prefs'; end if;
+  insert into public.user_prefs (user_id, notify) values (me, p_prefs)
+    on conflict (user_id) do update set notify = excluded.notify;
+end;
+$$;
+
+revoke execute on function public.get_notify_prefs(), public.set_notify_prefs(jsonb) from public, anon;
+grant execute on function public.get_notify_prefs(), public.set_notify_prefs(jsonb) to authenticated;
+
 -- ===== Zálohy =====
 -- Každou hodinu se uloží kopie každé skupiny, která se od poslední zálohy změnila.
 -- Uchovává se posledních 48 verzí na skupinu; starší se mažou.

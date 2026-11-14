@@ -104,7 +104,8 @@ export async function updatePassword(password) {
 export async function signOut() {
   const token = session?.access_token;
   set(null);
-  if (token) await call('/logout', { token }).catch(() => {});
+  // scope=local: odhlásí jen tohle zařízení, ostatní (třeba telefon) zůstanou přihlášená.
+  if (token) await call('/logout?scope=local', { token }).catch(() => {});
 }
 
 // Platný přístupový token; krátce před vypršením ho obnoví.
