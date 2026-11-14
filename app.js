@@ -262,7 +262,7 @@ function Home({ groups, profile, account, activeId, onOpen, onNew, onProfile, on
             <span class="avatar">${g.emoji}</span>
             <span class="grow">
               <strong>${g.name}</strong>
-              <small class="muted">${g.members.length} lidí · utraceno ${fmt(total, g.currency)}${g.members.filter((m) => m.uid).length > 1 ? ' · sdílená' : ''}${account && !g.remote ? ' · čeká na odeslání' : ''}</small>
+              <small class="muted">${g.members.filter((m) => !m.inactive).length} lidí · ${total < 0 ? 'čistý příjem ' + fmt(-total, g.currency) : 'utraceno ' + fmt(total, g.currency)}${g.members.filter((m) => m.uid).length > 1 ? ' · sdílená' : ''}${account && !g.remote ? ' · čeká na odeslání' : ''}</small>
             </span>
             <span class="right">
               <small class="muted">${my > 0 ? 'dostaneš' : my < 0 ? 'dlužíš' : ''}</small>
@@ -285,6 +285,24 @@ function GroupView({ group, onBack, onEdit, onShare, onEntry, onAdd, onPay, onQr
   const st = useMemo(() => stats(group), [group]);
   const my = bal[group.me] || 0;
   const cur = group.currency;
+
+  // Počítač: pravý sloupec jede se stránkou, a když dojede na svůj konec, zůstane stát,
+  // zatímco výdaje vlevo pokračují. Je-li nižší než okno, drží se hned pod záhlavím.
+  const colRef = useRef();
+  useEffect(() => {
+    const place = () => {
+      const col = colRef.current;
+      if (!col) return;
+      const headH = document.querySelector('.group-top')?.offsetHeight || 0;
+      const fits = col.offsetHeight <= innerHeight - headH - 16;
+      col.style.top = (fits ? headH : innerHeight - col.offsetHeight - 16) + 'px';
+    };
+    place();
+    const ro = new ResizeObserver(place);
+    ro.observe(colRef.current);
+    addEventListener('resize', place);
+    return () => { ro.disconnect(); removeEventListener('resize', place); };
+  }, []);
 
   return html`
     <header class="top group-top">
@@ -311,7 +329,7 @@ function GroupView({ group, onBack, onEdit, onShare, onEntry, onAdd, onPay, onQr
         <h2 class="panel-title">Výdaje</h2>
         <${Entries} group=${group} onEntry=${onEntry} />
       </section>
-      <div class="col-right">
+      <div class="col-right" ref=${colRef}>
       <section class=${'panel p-debts' + (tab === 'debts' ? ' on' : '')}>
         <${Debts} group=${group} bal=${bal} onPay=${onPay} onQr=${onQr} />
       </section>
@@ -405,12 +423,12 @@ function Debts({ group, bal, onPay, onQr }) {
       `}
     <h3 class="day">Zůstatky</h3>
     <div class="card pad">
-      ${group.members.map((m) => {
+      ${group.members.filter((m) => !m.inactive || bal[m.id]).map((m) => {
         const v = bal[m.id] || 0;
         return html`
           <div class="bal-row">
             <${Avatar} m=${m} size=${26} />
-            <span class="bal-name">${m.name}${m.id === group.me ? html` <em class="tag">ty</em>` : ''}</span>
+            <span class="bal-name">${m.name}${m.id === group.me ? html` <em class="tag">ty</em>` : ''}${m.inactive ? html` <em class="tag off">neaktivní</em>` : ''}</span>
             <span class="bal-bar">
               ${v !== 0 && html`<i class=${v > 0 ? 'p' : 'n'} style=${`width:${(Math.abs(v) / max) * 50}%`}></i>`}
             </span>
@@ -442,7 +460,7 @@ function Stats({ group, st }) {
     <div class="card pad">
       ${group.members.map((m) => html`
         <div class="stat-row">
-          <div class="row"><${Avatar} m=${m} size=${26} /><strong class="grow">${m.name}</strong></div>
+          <div class="row"><${Avatar} m=${m} size=${26} /><strong class="grow">${m.name}${m.inactive ? html` <em class="tag off">neaktivní</em>` : ''}</strong></div>
           <div class="row sub"><span class="lbl">zaplatil(a)</span><div class="track grow"><i class="alt" style=${`width:${((st.paid[m.id] || 0) / maxP) * 100}%`}></i></div><span class="num">${fmt(st.paid[m.id] || 0, cur)}</span></div>
           <div class="row sub"><span class="lbl">podíl na útratě</span><div class="track grow"><i style=${`width:${((st.consumed[m.id] || 0) / maxP) * 100}%`}></i></div><span class="num">${fmt(st.consumed[m.id] || 0, cur)}</span></div>
         </div>
@@ -454,7 +472,8 @@ function Stats({ group, st }) {
 /* ---------- Formulář výdaje / převodu ---------- */
 
 function EntryForm({ group, entry, onSave, onDelete }) {
-  const members = group.members;
+  // Neaktivní členy nabízíme jen u starých záznamů, ve kterých figurují.
+  const members = group.members.filter((m) => !m.inactive || (entry && (entry.paidBy === m.id || m.id in entry.parts)));
   const init = entry || {
     kind: 'expense', title: '', amount: 0, currency: group.currency, rate: 1,
     paidBy: group.me, mode: 'equal', category: 'food', date: today(),
@@ -681,6 +700,11 @@ function GroupForm({ group, profile, userId, admin, deleteLabel, onSave, onDelet
               disabled=${!mayIban(m)}
               placeholder=${mayIban(m) ? 'Číslo účtu pro QR platbu (nepovinné)' : 'Číslo účtu si vyplní člen sám'} />
             ${m.iban && !toIban(m.iban) ? html`<small class="neg">Zadej ve tvaru 123456789/0800 nebo IBAN.</small>` : ''}
+            ${group && html`
+              <label class="check small">
+                <input type="checkbox" checked=${!!m.inactive} onChange=${(e) => upd(m.id, { inactive: e.target.checked || undefined })} />
+                <span>Neaktivní (historie zůstane, v nových výdajích a seznamech se nenabízí)</span>
+              </label>`}
           </div>
         `)}
       </div>
@@ -788,7 +812,7 @@ function WhoSheet({ group, profile, known, onPick }) {
   const [name, setName] = useState(profile.name);
   const likely = (m) => known.some((k) => sameName(k, m.name));
   // Nabízíme jen členy, které si ještě nikdo nepřivlastnil; pravděpodobná shoda je nahoře.
-  const free = group.members.filter((m) => !m.uid).sort((a, b) => likely(b) - likely(a));
+  const free = group.members.filter((m) => !m.uid && !m.inactive).sort((a, b) => likely(b) - likely(a));
   return html`
     <div class="form">
       <p>Vyber, kdo ze skupiny jsi. Tvůj účet se propojí s tímto členem a s jeho dosavadními výdaji.</p>

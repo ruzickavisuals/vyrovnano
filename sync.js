@@ -75,7 +75,8 @@ export function sanitize(d) {
   }
   const members = d.members.slice(0, 100)
     .filter((m) => m && okId(m.id))
-    .map((m) => ({ id: m.id, name: str(m.name, 60) || '?', iban: str(m.iban, 50) || undefined, avatar: okAvatar(m.avatar), uid: okUuid(m.uid) }));
+    .map((m) => ({ id: m.id, name: str(m.name, 60) || '?', iban: str(m.iban, 50) || undefined, avatar: okAvatar(m.avatar), uid: okUuid(m.uid),
+      inactive: m.inactive === true ? true : undefined }));
   const ids = new Set(members.map((m) => m.id));
   const entries = d.entries.slice(0, 5000)
     .filter((e) => e && okId(e.id) && ids.has(e.paidBy) && e.parts && typeof e.parts === 'object')
