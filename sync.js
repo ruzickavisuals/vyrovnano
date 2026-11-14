@@ -81,7 +81,7 @@ export function sanitize(d) {
     .filter((e) => e && okId(e.id) && ids.has(e.paidBy) && e.parts && typeof e.parts === 'object')
     .map((e) => ({
       id: e.id,
-      kind: e.kind === 'transfer' ? 'transfer' : 'expense',
+      kind: ['transfer', 'income'].includes(e.kind) ? e.kind : 'expense',
       title: str(e.title, 120),
       amount: Math.max(0, Math.round(num(e.amount))),
       currency: cur(e.currency),

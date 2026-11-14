@@ -12,6 +12,7 @@ import {
   updatePassword, signOut, consumeUrl,
 } from './auth.js';
 import { GOOGLE_LOGIN } from './config.js';
+import { parseSettleUp, decodeText } from './import.js';
 
 const KEY = 'vyrovnano.v1';
 const JKEY = 'vyrovnano.join';
@@ -99,7 +100,7 @@ function pickImage() {
 
 /* ---------- Domovská obrazovka ---------- */
 
-function Home({ groups, profile, onOpen, onNew, onProfile }) {
+function Home({ groups, profile, onOpen, onNew, onProfile, onImport }) {
   return html`
     <header class="top row">
       <div class="grow">
@@ -135,6 +136,7 @@ function Home({ groups, profile, onOpen, onNew, onProfile }) {
         `;
       })}
       <button class="btn primary wide" onClick=${onNew}>+ Nová skupina</button>
+      <button class="btn wide" onClick=${onImport}>Importovat ze Settle Up</button>
     </main>
   `;
 }
@@ -206,16 +208,17 @@ function Entries({ group, onEntry }) {
             </button>
           `;
         }
-        const mine = (e.paidBy === group.me ? base : 0) - (shares(e)[group.me] || 0);
+        const inc = e.kind === 'income';
+        const mine = (inc ? -1 : 1) * ((e.paidBy === group.me ? base : 0) - (shares(e)[group.me] || 0));
         return html`
           <button class="item" onClick=${() => onEntry(e)}>
-            <span class="avatar sm">${cat(e.category).e}</span>
+            <span class="avatar sm">${inc ? '💰' : cat(e.category).e}</span>
             <span class="grow">
               <strong>${e.title}</strong>
-              <small class="muted">platil(a) ${nameOf(group, e.paidBy)}${e.currency !== cur ? ` · ${fmt(e.amount, e.currency)}` : ''}</small>
+              <small class="muted">${inc ? 'příjem · přijal(a)' : 'platil(a)'} ${nameOf(group, e.paidBy)}${e.currency !== cur ? ` · ${fmt(e.amount, e.currency)}` : ''}</small>
             </span>
             <span class="right">
-              <strong>${fmt(base, cur)}</strong>
+              <strong>${inc ? '+' : ''}${fmt(base, cur)}</strong>
               <small><${Balance} cents=${mine} currency=${cur} zero="netýká se tě" /></small>
             </span>
           </button>
@@ -319,7 +322,7 @@ function EntryForm({ group, entry, onSave, onDelete }) {
   const [mode, setMode] = useState(init.mode);
   const [parts, setParts] = useState(() =>
     Object.fromEntries(members.map((m) => {
-      const v = init.kind === 'expense' ? init.parts[m.id] || 0 : 1;
+      const v = init.kind !== 'transfer' ? init.parts[m.id] || 0 : 1;
       return [m.id, init.mode === 'exact' ? (v ? String(v / 100).replace('.', ',') : '') : v];
     })));
   const [to, setTo] = useState(
@@ -377,7 +380,7 @@ function EntryForm({ group, entry, onSave, onDelete }) {
 
   return html`
     <form onSubmit=${submit} class="form">
-      ${!entry && html`<${Seg} value=${kind} onChange=${setKind} options=${[['expense', 'Výdaj'], ['transfer', 'Převod peněz']]} />`}
+      ${!entry && html`<${Seg} value=${kind} onChange=${setKind} options=${[['expense', 'Výdaj'], ['income', 'Příjem'], ['transfer', 'Převod']]} />`}
 
       <div class="amount-row">
         <input class="amount" inputmode="decimal" placeholder="0" value=${amountStr} onInput=${(e) => setAmountStr(e.target.value)} aria-label="Částka" />
@@ -393,7 +396,7 @@ function EntryForm({ group, entry, onSave, onDelete }) {
         </label>
       `}
 
-      ${kind === 'expense' && html`
+      ${kind !== 'transfer' && html`
         <label class="field">
           <span>Za co</span>
           <input placeholder="např. Večeře" value=${title} onInput=${(e) => setTitle(e.target.value)} />
@@ -407,7 +410,7 @@ function EntryForm({ group, entry, onSave, onDelete }) {
 
       <div class="two">
         <label class="field">
-          <span>${kind === 'transfer' ? 'Kdo platí' : 'Kdo platil'}</span>
+          <span>${kind === 'transfer' ? 'Kdo platí' : kind === 'income' ? 'Kdo peníze přijal' : 'Kdo platil'}</span>
           <select value=${paidBy} onChange=${(e) => setPaidBy(e.target.value)}>
             ${members.map((m) => html`<option value=${m.id}>${m.name}</option>`)}
           </select>
@@ -427,7 +430,7 @@ function EntryForm({ group, entry, onSave, onDelete }) {
             </label>`}
       </div>
 
-      ${kind === 'expense' && html`
+      ${kind !== 'transfer' && html`
         <div class="field">
           <span>Jak rozdělit</span>
           <${Seg} value=${mode} onChange=${changeMode} options=${[['equal', 'Rovným dílem'], ['shares', 'Podíly'], ['exact', 'Přesné částky']]} />
@@ -939,6 +942,25 @@ function App({ user, recovery }) {
     }));
     close();
   }
+  function importSettleUp() {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.csv,text/csv';
+    input.onchange = async () => {
+      const file = input.files[0];
+      if (!file) return;
+      try {
+        const { group: g, imported, skipped } = parseSettleUp(decodeText(await file.arrayBuffer()), file.name);
+        const id = user ? crypto.randomUUID() : uid();
+        setGroups((gs) => [...gs, { ...g, id, mu: Date.now() }]);
+        setGid(id);
+        if (skipped) alert(`Načteno ${imported} záznamů. ${skipped} řádků se nepodařilo přečíst a bylo přeskočeno.`);
+      } catch (e) {
+        alert(e.message || 'Soubor se nepodařilo načíst.');
+      }
+    };
+    input.click();
+  }
   async function removeGroup(g) {
     if (user) {
       const others = g.members.some((m) => m.uid && m.uid !== user.id);
@@ -1010,7 +1032,7 @@ function App({ user, recovery }) {
               paidBy: p.from, mode: 'equal', parts: { [p.to]: 1 }, category: 'other', date: today(),
             })} />`
         : html`<${Home} groups=${groups} profile=${prof} onOpen=${setGid}
-            onNew=${() => setSheet({ type: 'group' })} onProfile=${() => setSheet({ type: 'profile' })} />`}
+            onNew=${() => setSheet({ type: 'group' })} onProfile=${() => setSheet({ type: 'profile' })} onImport=${importSettleUp} />`}
 
       ${sheet?.type === 'group' && html`
         <${Sheet} title=${sheet.group ? 'Upravit skupinu' : 'Nová skupina'} onClose=${close}>

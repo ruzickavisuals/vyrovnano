@@ -63,8 +63,10 @@ export function balances(group) {
   const b = Object.fromEntries(group.members.map((m) => [m.id, 0]));
   for (const e of group.entries) {
     const s = shares(e);
-    b[e.paidBy] = (b[e.paidBy] || 0) + baseAmount(e);
-    for (const id in s) b[id] = (b[id] || 0) - s[id];
+    // Příjem (např. prodej společné věci) je opak výdaje: kdo peníze přijal, dluží podíly ostatním.
+    const sign = e.kind === 'income' ? -1 : 1;
+    b[e.paidBy] = (b[e.paidBy] || 0) + sign * baseAmount(e);
+    for (const id in s) b[id] = (b[id] || 0) - sign * s[id];
   }
   return b;
 }
