@@ -620,3 +620,10 @@ mark { background: color-mix(in srgb, var(--accent) 28%, transparent); color: in
   .sheet-body { padding-bottom: calc(env(safe-area-inset-bottom) + 116px); }
   .dialog-overlay { z-index: 60; }
 }
+
+/* ---------- Řazení skupin tažením celé karty (bez úchytu) ---------- */
+.list-tools { padding: 0; }
+.group-row { position: relative; -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; will-change: transform; }
+.group-row .group-card { cursor: pointer; }
+.is-dragging .group-row { transition: transform 0.18s ease; }
+.group-row.dragging .group-card { outline: 2px solid var(--g); outline-offset: -2px; opacity: 1; box-shadow: 0 14px 34px rgb(0 0 0 / 0.38); cursor: grabbing; }

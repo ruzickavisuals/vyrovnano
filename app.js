@@ -320,28 +320,66 @@ function EmojiPicker({ value, onChange }) {
 /* ---------- Domovská obrazovka ---------- */
 
 function Home({ groups, profile, account, activeId, onOpen, onNew, onProfile, onReorder, onSortByName, onSearch }) {
-  // Přetažení skupiny za úchyt: funguje myší i prstem. Pořadí se mění průběžně podle toho,
-  // nad kterou kartou se ukazatel právě nachází.
-  const [drag, setDrag] = useState(null);
+  // Změna pořadí tažením celé karty. Na dotykovém displeji se karta „chytí“ krátkým podržením
+  // (aby šlo seznamem normálně rolovat), myší stačí kartu stisknout a táhnout.
+  // Během tažení karta sleduje prst a ostatní se plynule rozestupují; pořadí se uloží po puštění.
+  const [drag, setDrag] = useState(null); // { id, from, to, startY, y, h }
   const listRef = useRef();
-  const down = (e, id) => {
-    e.preventDefault();
-    try { e.currentTarget.setPointerCapture(e.pointerId); } catch {}
-    setDrag(id);
+  const press = useRef(null);
+  const dragRef = useRef(null);
+  dragRef.current = drag;
+  const justDragged = useRef(false);
+  useEffect(() => {
+    // Při tažení nesmí stránka rolovat.
+    const el = listRef.current;
+    const stop = (e) => { if (dragRef.current) e.preventDefault(); };
+    el.addEventListener('touchmove', stop, { passive: false });
+    return () => el.removeEventListener('touchmove', stop);
+  }, []);
+  const begin = (p) => {
+    const rows = [...listRef.current.querySelectorAll('.group-row')];
+    const h = rows.length > 1 ? rows[1].offsetTop - rows[0].offsetTop : rows[0].offsetHeight + 12;
+    try { p.el.setPointerCapture(p.pointerId); } catch {}
+    justDragged.current = true;
+    setDrag({ id: p.id, from: p.index, to: p.index, startY: p.y, y: p.y, h });
+  };
+  const down = (e, id, index) => {
+    if (groups.length < 2 || e.button > 0) return;
+    const p = { id, index, x: e.clientX, y: e.clientY, pointerId: e.pointerId, el: e.currentTarget, touch: e.pointerType !== 'mouse' };
+    press.current = p;
+    if (p.touch) p.timer = setTimeout(() => { if (press.current === p) begin(p); }, 260);
   };
   const move = (e) => {
-    if (!drag) return;
-    const rows = [...listRef.current.querySelectorAll('.group-row')];
-    let over = rows.findIndex((r) => {
-      const b = r.getBoundingClientRect();
-      return e.clientY < b.top + b.height / 2;
-    });
-    if (over < 0) over = rows.length;
-    const from = groups.findIndex((g) => g.id === drag);
-    const to = over > from ? over - 1 : over;
-    if (to !== from) onReorder(from, to);
+    const p = press.current;
+    if (!p) return;
+    const d = dragRef.current;
+    if (!d) {
+      const far = Math.abs(e.clientY - p.y) > 7 || Math.abs(e.clientX - p.x) > 7;
+      if (!far) return;
+      if (p.touch) { clearTimeout(p.timer); press.current = null; } // pohyb před podržením = rolování
+      else begin(p);
+      return;
+    }
+    const to = Math.max(0, Math.min(groups.length - 1, Math.round(d.from + (e.clientY - d.startY) / d.h)));
+    setDrag({ ...d, y: e.clientY, to });
   };
-  const up = () => setDrag(null);
+  const finish = (commit) => {
+    if (press.current) clearTimeout(press.current.timer);
+    press.current = null;
+    const d = dragRef.current;
+    if (!d) return;
+    setDrag(null);
+    if (commit && d.to !== d.from) onReorder(d.from, d.to);
+    setTimeout(() => { justDragged.current = false; }, 80);
+  };
+  const rowStyle = (i) => {
+    if (!drag) return '';
+    if (i === drag.from) return `transform:translateY(${Math.round(drag.y - drag.startY)}px) scale(1.02);z-index:5;transition:none`;
+    const shift = drag.to > drag.from
+      ? (i > drag.from && i <= drag.to ? -drag.h : 0)
+      : (i < drag.from && i >= drag.to ? drag.h : 0);
+    return `transform:translateY(${shift}px)`;
+  };
   return html`
     <header class="top row">
       <div class="grow">
@@ -363,16 +401,17 @@ function Home({ groups, profile, account, activeId, onOpen, onNew, onProfile, on
           <button class="search-btn only-wide" onClick=${onSearch}><${Icon} name="search" size=${16} /> Hledat <kbd>/</kbd></button>
           <button class="link-btn" onClick=${onSortByName}>Seřadit podle názvu</button>
         </div>`}
-      <div class="group-list" ref=${listRef}>
-      ${groups.map((g) => {
+      <div class=${'group-list' + (drag ? ' is-dragging' : '')} ref=${listRef}>
+      ${groups.map((g, i) => {
         const my = balances(g)[g.me] || 0;
         const { total } = stats(g);
         return html`
-          <div class=${'group-row gc-' + (g.color || 'teal') + (drag === g.id ? ' dragging' : '')} key=${g.id}>
-          ${groups.length > 1 && html`
-            <span class="grip" role="button" aria-label=${'Přesunout skupinu ' + g.name} title="Přetáhni pro změnu pořadí"
-              onPointerDown=${(e) => down(e, g.id)} onPointerMove=${move} onPointerUp=${up} onPointerCancel=${up}>⠿</span>`}
-          <button class=${'card group-card' + (g.id === activeId ? ' active' : '')} onClick=${() => onOpen(g.id)}>
+          <div class=${'group-row gc-' + (g.color || 'teal') + (drag?.id === g.id ? ' dragging' : '')} key=${g.id} style=${rowStyle(i)}
+            onPointerDown=${(e) => down(e, g.id, i)} onPointerMove=${move} onPointerUp=${() => finish(true)}
+            onPointerCancel=${() => finish(false)} onContextMenu=${(e) => e.preventDefault()}>
+          <button class=${'card group-card' + (g.id === activeId ? ' active' : '')}
+            title=${groups.length > 1 ? 'Podržením a tažením změníš pořadí' : ''}
+            onClick=${() => { if (justDragged.current) return; onOpen(g.id); }}>
             <span class="avatar">${g.emoji}</span>
             <span class="grow">
               <strong>${g.name}</strong>
