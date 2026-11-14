@@ -661,3 +661,33 @@ mark { background: color-mix(in srgb, var(--accent) 28%, transparent); color: in
   .peek-sheet .overlay:not(.dialog-overlay) { background: transparent; }
   .peek-sheet .sheet { box-shadow: -14px 0 40px rgb(0 0 0 / 0.45); will-change: transform; }
 }
+
+/* ---------- Plynulé animace (průběh podobný iOS, pohyb jen přes transform) ---------- */
+:root { --ease: cubic-bezier(0.32, 0.72, 0, 1); }
+.sheet { animation: up 0.34s var(--ease); will-change: transform; }
+@keyframes up { from { transform: translate3d(0, 28px, 0); opacity: 0; } }
+@media (max-width: 899px) {
+  /* Celoobrazovkové okno vyjede zdola jako nativní obrazovka. */
+  .sheet { animation: slide-up 0.36s var(--ease); }
+  @keyframes slide-up { from { transform: translate3d(0, 100%, 0); } }
+}
+.sheet:not(.pulling) { transition: none; }
+.is-dragging .group-row { transition: transform 0.24s var(--ease); }
+.is-dragging .group-row.dragging { transition: none; z-index: 5; }
+.group-row.dragging .group-card { box-shadow: 0 16px 36px rgb(0 0 0 / 0.4); }
+.swipe-fg { will-change: transform; position: relative; z-index: 1; }
+.swipe:not(.swiping) .swipe-fg { transition: none; }
+/* Pozadí řádku: vlevo „Upravit“, vpravo „Smazat“; ukáže se to, ke kterému se táhne. */
+.swipe-bg, .swipe.swiping .swipe-bg {
+  display: none; position: absolute; inset: 0; align-items: center; padding: 0 22px; color: #fff; font-weight: 700; font-size: 14px;
+}
+.swipe.to-delete .swipe-bg.del { display: flex; justify-content: flex-end; background: color-mix(in srgb, var(--neg) 55%, var(--card)); }
+.swipe.to-edit .swipe-bg.edit { display: flex; justify-content: flex-start; background: color-mix(in srgb, var(--accent) 45%, var(--card)); color: var(--text); }
+.swipe.to-delete.armed .swipe-bg.del { background: var(--neg); }
+.swipe.to-edit.armed .swipe-bg.edit { background: var(--accent); color: var(--on-accent); }
+.tabbar button, .btn, .icon-btn, .chip, .seg button { transition: transform 0.12s var(--ease), background-color 0.15s, color 0.15s; }
+.btn:active, .icon-btn:active, .chip:active { transform: scale(0.97); }
+@media (prefers-reduced-motion: reduce) {
+  .sheet { animation: none !important; }
+  * { transition-duration: 0.01ms !important; }
+}

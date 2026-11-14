@@ -80,20 +80,42 @@ function Icon({ name, size = 22 }) {
 
 /* ---------- Drobné stavební prvky ---------- */
 
+// Plynulost gest: při tažení se nemění stav aplikace (to by překreslovalo celé obrazovky),
+// hýbe se jen s jedním prvkem přes transform. Stav se změní až po puštění prstu.
+const EASE = 'cubic-bezier(0.32, 0.72, 0, 1)'; // průběh podobný animacím v iOS
+
 function Sheet({ title, onClose, children }) {
-  // Dotyk: okno jde zavřít stažením záhlaví dolů, stejně jako v nativních aplikacích.
-  const [dy, setDy] = useState(0);
-  const start = useRef(null);
-  const down = (e) => { if (e.pointerType !== 'mouse' && e.clientX > 26 && !e.target.closest('button')) start.current = e.clientY; };
-  const move = (e) => { if (start.current !== null) setDy(Math.max(0, e.clientY - start.current)); };
+  // Dotyk: okno jde zavřít stažením záhlaví dolů.
+  const el = useRef();
+  const g = useRef(null);
+  const down = (e) => {
+    if (e.pointerType === 'mouse' || e.clientX <= 26 || e.target.closest('button')) return;
+    g.current = { y: e.clientY, dy: 0 };
+    el.current.style.transition = 'none';
+  };
+  const move = (e) => {
+    const p = g.current;
+    if (!p) return;
+    p.dy = Math.max(0, e.clientY - p.y);
+    el.current.style.transform = `translate3d(0,${p.dy}px,0)`;
+    el.current.classList.toggle('pulling', p.dy > 0);
+  };
   const up = () => {
-    if (start.current === null) return;
-    start.current = null;
-    if (dy > 110) onClose(); else setDy(0);
+    const p = g.current;
+    if (!p) return;
+    g.current = null;
+    const node = el.current;
+    const go = p.dy > 110;
+    node.style.transition = `transform 0.3s ${EASE}`;
+    node.style.transform = go ? 'translate3d(0,100%,0)' : 'translate3d(0,0,0)';
+    setTimeout(() => {
+      if (go) return onClose();
+      node.style.transition = ''; node.style.transform = ''; node.classList.remove('pulling');
+    }, 300);
   };
   return html`
     <div class="overlay" onClick=${(e) => e.target === e.currentTarget && onClose()}>
-      <div class=${'sheet' + (dy ? ' pulling' : '')} role="dialog" aria-label=${title} style=${dy ? `transform:translateY(${dy}px)` : ''}>
+      <div class="sheet" role="dialog" aria-label=${title} ref=${el}>
         <div class="sheet-head" onPointerDown=${down} onPointerMove=${move} onPointerUp=${up} onPointerCancel=${up}>
           <span class="grabber" aria-hidden="true"></span>
           <h2>${title}</h2>
@@ -105,38 +127,54 @@ function Sheet({ title, onClose, children }) {
   `;
 }
 
-// Dotyk: řádek jde odsunout doleva a tím vyvolat smazání (smazání se vždy ještě potvrzuje).
-function SwipeRow({ onDelete, children }) {
-  const [dx, setDx] = useState(0);
+// Dotyk: řádek jde odsunout. Doleva = smazat (vždy s potvrzením), doprava = upravit.
+function SwipeRow({ onDelete, onEdit, children }) {
+  const wrap = useRef();
+  const fg = useRef();
   const st = useRef(null);
   const swiped = useRef(false);
-  const down = (e) => { if (e.pointerType !== 'mouse') st.current = { x: e.clientX, y: e.clientY, on: false }; };
+  const LIMIT = 132, TRIGGER = 84;
+  const down = (e) => { if (e.pointerType !== 'mouse' && e.clientX > 26) st.current = { x: e.clientX, y: e.clientY, on: false, dx: 0 }; };
   const move = (e) => {
     const p = st.current;
     if (!p) return;
-    const ddx = e.clientX - p.x, ddy = e.clientY - p.y;
+    const dx = e.clientX - p.x, dy = e.clientY - p.y;
     if (!p.on) {
-      if (Math.abs(ddy) > 10 && Math.abs(ddy) > Math.abs(ddx)) { st.current = null; return; } // svislé rolování
-      if (ddx > -10) return;
+      if (Math.abs(dy) > 10 && Math.abs(dy) > Math.abs(dx)) { st.current = null; return; } // svislé rolování
+      if (Math.abs(dx) < 10) return;
       p.on = true;
       swiped.current = true;
+      fg.current.style.transition = 'none';
       try { e.currentTarget.setPointerCapture(e.pointerId); } catch {}
     }
-    setDx(Math.max(-140, Math.min(0, ddx)));
+    // Za hranicí klade řádek odpor, jako v iOS.
+    const over = Math.abs(dx) - LIMIT;
+    p.dx = over > 0 ? Math.sign(dx) * (LIMIT + over * 0.25) : dx;
+    fg.current.style.transform = `translate3d(${p.dx}px,0,0)`;
+    const c = wrap.current.classList;
+    c.toggle('to-delete', p.dx < 0);
+    c.toggle('to-edit', p.dx > 0);
+    c.toggle('armed', Math.abs(p.dx) > TRIGGER);
   };
   const up = () => {
     const p = st.current;
     st.current = null;
     if (!p || !p.on) return;
-    const go = dx < -90;
-    setDx(0);
-    if (go) onDelete();
-    setTimeout(() => { swiped.current = false; }, 120);
+    fg.current.style.transition = `transform 0.32s ${EASE}`;
+    fg.current.style.transform = 'translate3d(0,0,0)';
+    setTimeout(() => {
+      if (fg.current) { fg.current.style.transition = ''; fg.current.style.transform = ''; }
+      if (wrap.current) wrap.current.classList.remove('to-delete', 'to-edit', 'armed');
+      swiped.current = false;
+    }, 320);
+    if (p.dx < -TRIGGER) onDelete();
+    else if (p.dx > TRIGGER) onEdit();
   };
   return html`
-    <div class=${'swipe' + (dx ? ' swiping' : '') + (dx < -90 ? ' armed' : '')}>
-      <span class="swipe-bg" aria-hidden="true">Smazat</span>
-      <div class="swipe-fg" style=${dx ? `transform:translateX(${dx}px)` : ''}
+    <div class="swipe" ref=${wrap}>
+      <span class="swipe-bg edit" aria-hidden="true">Upravit</span>
+      <span class="swipe-bg del" aria-hidden="true">Smazat</span>
+      <div class="swipe-fg" ref=${fg}
         onPointerDown=${down} onPointerMove=${move} onPointerUp=${up} onPointerCancel=${up}
         onClickCapture=${(e) => { if (swiped.current) { e.stopPropagation(); e.preventDefault(); } }}>
         ${children}
@@ -373,17 +411,15 @@ function EmojiPicker({ value, onChange }) {
 function Home({ groups, profile, account, activeId, onOpen, onNew, onProfile, onReorder, onSortByName, onSearch }) {
   // Změna pořadí tažením celé karty. Na dotykovém displeji se karta „chytí“ krátkým podržením
   // (aby šlo seznamem normálně rolovat), myší stačí kartu stisknout a táhnout.
-  // Během tažení karta sleduje prst a ostatní se plynule rozestupují; pořadí se uloží po puštění.
-  const [drag, setDrag] = useState(null); // { id, from, to, startY, y, h }
+  // Během tažení se hýbe jen s kartami přes transform; pořadí se uloží až po puštění.
   const listRef = useRef();
   const press = useRef(null);
-  const dragRef = useRef(null);
-  dragRef.current = drag;
+  const drag = useRef(null); // { from, to, startY, h, rows }
   const justDragged = useRef(false);
   useEffect(() => {
     // Při tažení nesmí stránka rolovat.
     const el = listRef.current;
-    const stop = (e) => { if (dragRef.current) e.preventDefault(); };
+    const stop = (e) => { if (drag.current) e.preventDefault(); };
     el.addEventListener('touchmove', stop, { passive: false });
     return () => el.removeEventListener('touchmove', stop);
   }, []);
@@ -392,18 +428,20 @@ function Home({ groups, profile, account, activeId, onOpen, onNew, onProfile, on
     const h = rows.length > 1 ? rows[1].offsetTop - rows[0].offsetTop : rows[0].offsetHeight + 12;
     try { p.el.setPointerCapture(p.pointerId); } catch {}
     justDragged.current = true;
-    setDrag({ id: p.id, from: p.index, to: p.index, startY: p.y, y: p.y, h });
+    drag.current = { from: p.index, to: p.index, startY: p.y, h, rows };
+    listRef.current.classList.add('is-dragging');
+    rows[p.index].classList.add('dragging');
   };
-  const down = (e, id, index) => {
-    if (groups.length < 2 || e.button > 0) return;
-    const p = { id, index, x: e.clientX, y: e.clientY, pointerId: e.pointerId, el: e.currentTarget, touch: e.pointerType !== 'mouse' };
+  const down = (e, index) => {
+    if (groups.length < 2 || e.button > 0 || e.clientX <= 26) return;
+    const p = { index, x: e.clientX, y: e.clientY, pointerId: e.pointerId, el: e.currentTarget, touch: e.pointerType !== 'mouse' };
     press.current = p;
-    if (p.touch) p.timer = setTimeout(() => { if (press.current === p) begin(p); }, 260);
+    if (p.touch) p.timer = setTimeout(() => { if (press.current === p) begin(p); }, 240);
   };
   const move = (e) => {
     const p = press.current;
     if (!p) return;
-    const d = dragRef.current;
+    const d = drag.current;
     if (!d) {
       const far = Math.abs(e.clientY - p.y) > 7 || Math.abs(e.clientX - p.x) > 7;
       if (!far) return;
@@ -411,26 +449,37 @@ function Home({ groups, profile, account, activeId, onOpen, onNew, onProfile, on
       else begin(p);
       return;
     }
-    const to = Math.max(0, Math.min(groups.length - 1, Math.round(d.from + (e.clientY - d.startY) / d.h)));
-    setDrag({ ...d, y: e.clientY, to });
+    const dy = e.clientY - d.startY;
+    d.rows[d.from].style.transform = `translate3d(0,${dy}px,0) scale(1.03)`;
+    const to = Math.max(0, Math.min(d.rows.length - 1, Math.round(d.from + dy / d.h)));
+    if (to === d.to) return;
+    d.to = to;
+    d.rows.forEach((row, i) => {
+      if (i === d.from) return;
+      const shift = to > d.from ? (i > d.from && i <= to ? -d.h : 0) : (i < d.from && i >= to ? d.h : 0);
+      row.style.transform = shift ? `translate3d(0,${shift}px,0)` : '';
+    });
   };
   const finish = (commit) => {
     if (press.current) clearTimeout(press.current.timer);
     press.current = null;
-    const d = dragRef.current;
+    const d = drag.current;
     if (!d) return;
-    setDrag(null);
-    if (commit && d.to !== d.from) onReorder(d.from, d.to);
-    setTimeout(() => { justDragged.current = false; }, 80);
+    drag.current = null;
+    const done = () => {
+      listRef.current.classList.remove('is-dragging');
+      d.rows.forEach((row) => { row.style.transform = ''; row.style.transition = ''; row.classList.remove('dragging'); });
+      if (commit && d.to !== d.from) onReorder(d.from, d.to);
+      setTimeout(() => { justDragged.current = false; }, 80);
+    };
+    // Karta nejdřív dojede na své nové místo, teprve pak se pořadí uloží.
+    const row = d.rows[d.from];
+    row.style.transition = `transform 0.2s ${EASE}`;
+    row.style.transform = `translate3d(0,${(commit ? d.to - d.from : 0) * d.h}px,0)`;
+    setTimeout(done, 200);
   };
-  const rowStyle = (i) => {
-    if (!drag) return '';
-    if (i === drag.from) return `transform:translateY(${Math.round(drag.y - drag.startY)}px) scale(1.02);z-index:5;transition:none`;
-    const shift = drag.to > drag.from
-      ? (i > drag.from && i <= drag.to ? -drag.h : 0)
-      : (i < drag.from && i >= drag.to ? drag.h : 0);
-    return `transform:translateY(${shift}px)`;
-  };
+  // Součty na kartách se počítají jen při změně dat, ne při každém překreslení.
+  const cards = useMemo(() => groups.map((g) => ({ my: balances(g)[g.me] || 0, total: stats(g).total })), [groups]);
   return html`
     <header class="top row">
       <div class="grow">
@@ -452,13 +501,12 @@ function Home({ groups, profile, account, activeId, onOpen, onNew, onProfile, on
           <button class="search-btn only-wide" onClick=${onSearch}><${Icon} name="search" size=${16} /> Hledat <kbd>/</kbd></button>
           <button class="link-btn only-wide" onClick=${onSortByName}>Seřadit podle názvu</button>
         </div>`}
-      <div class=${'group-list' + (drag ? ' is-dragging' : '')} ref=${listRef}>
+      <div class="group-list" ref=${listRef}>
       ${groups.map((g, i) => {
-        const my = balances(g)[g.me] || 0;
-        const { total } = stats(g);
+        const { my, total } = cards[i] || { my: 0, total: 0 };
         return html`
-          <div class=${'group-row gc-' + (g.color || 'teal') + (drag?.id === g.id ? ' dragging' : '')} key=${g.id} style=${rowStyle(i)}
-            onPointerDown=${(e) => down(e, g.id, i)} onPointerMove=${move} onPointerUp=${() => finish(true)}
+          <div class=${'group-row gc-' + (g.color || 'teal')} key=${g.id}
+            onPointerDown=${(e) => down(e, i)} onPointerMove=${move} onPointerUp=${() => finish(true)}
             onPointerCancel=${() => finish(false)} onContextMenu=${(e) => e.preventDefault()}>
           <button class=${'card group-card' + (g.id === activeId ? ' active' : '')}
             title=${groups.length > 1 ? 'Podržením a tažením změníš pořadí' : ''}
@@ -573,6 +621,18 @@ function GroupView({ group, onBack, onEdit, onShare, onEntry, onAdd, onPay, onQr
     return () => { ro.disconnect(); removeEventListener('resize', place); };
   }, []);
 
+  // Dlouhé seznamy se vykreslí znovu jen při změně dat skupiny. Otevření okna nebo jiná drobná
+  // změna stavu je tak nepřepočítává a animace zůstávají plynulé.
+  const cb = useRef({});
+  cb.current = { onEntry, onDelete, onPay, onQr, onMove };
+  const canMove = !!onMove;
+  const entriesView = useMemo(() => html`<${Entries} group=${group}
+    onEntry=${(e) => cb.current.onEntry(e)} onDelete=${(e) => cb.current.onDelete(e)} />`, [group]);
+  const debtsView = useMemo(() => html`<${Debts} group=${group} bal=${bal}
+    onPay=${(p) => cb.current.onPay(p)} onQr=${(p) => cb.current.onQr(p)}
+    onMove=${canMove ? (p) => cb.current.onMove(p) : null} />`, [group, bal, canMove]);
+  const statsView = useMemo(() => html`<${Stats} group=${group} st=${st} />`, [group, st]);
+
   return html`
     <header class="top group-top">
       <div class="row">
@@ -598,14 +658,14 @@ function GroupView({ group, onBack, onEdit, onShare, onEntry, onAdd, onPay, onQr
     <main class="with-fab panels">
       <section class=${'panel p-entries' + (tab === 'entries' ? ' on' : '')}>
         <h2 class="panel-title">Výdaje</h2>
-        <${Entries} group=${group} onEntry=${onEntry} onDelete=${onDelete} />
+        ${entriesView}
       </section>
       <div class="col-right" ref=${colRef}>
       <section class=${'panel p-debts' + (tab === 'debts' ? ' on' : '')}>
-        <${Debts} group=${group} bal=${bal} onPay=${onPay} onQr=${onQr} onMove=${onMove} />
+        ${debtsView}
       </section>
       <section class=${'panel p-stats' + (tab === 'stats' ? ' on' : '')}>
-        <${Stats} group=${group} st=${st} />
+        ${statsView}
       </section>
       </div>
     </main>
@@ -637,7 +697,7 @@ function Entries({ group, onEntry, onDelete }) {
           const moved = e.mvd === 'in';
           const paid = !e.mv && (!e.title || e.title === 'Převod' || /vyrovn|uhra[zd]/i.test(e.title));
           return html`
-            <${SwipeRow} onDelete=${() => onDelete(e)}>
+            <${SwipeRow} onDelete=${() => onDelete(e)} onEdit=${() => onEntry(e)}>
             <button class="item" onClick=${() => onEntry(e)}>
               <span class="avatar sm">${e.mv ? '🔀' : '💱'}</span>
               <span class="grow">
@@ -655,7 +715,7 @@ function Entries({ group, onEntry, onDelete }) {
         const inc = e.kind === 'income';
         const mine = (inc ? -1 : 1) * ((e.paidBy === group.me ? base : 0) - (shares(e)[group.me] || 0));
         return html`
-          <${SwipeRow} onDelete=${() => onDelete(e)}>
+          <${SwipeRow} onDelete=${() => onDelete(e)} onEdit=${() => onEntry(e)}>
           <button class="item" onClick=${() => onEntry(e)}>
             <span class="avatar sm">${inc ? '💰' : cat(catOf(e)).e}</span>
             <span class="grow">
@@ -1723,13 +1783,17 @@ function App({ user, recovery }) {
       } else {
         synced.current[id] = canon(res.data);
         // Sloučíme znovu s aktuálním stavem, kdyby uživatel mezitím něco změnil.
-        setGroups((gs) => gs.map((x) => {
-          if (x.id !== id) return x;
+        setGroups((gs) => {
+          const x = gs.find((g) => g.id === id);
+          if (!x) return gs;
           const local = sanitize(shared(x));
           const m = merge(local, res.data);
           const same = canon(m) === canon(local) && x.invite === res.invite && x.owner === res.owner && x.remote;
-          return same ? x : withMe({ ...x, ...m, invite: res.invite, owner: res.owner, remote: true });
-        }));
+          // Beze změny vracíme tentýž seznam, takže se nic nepřekresluje ani znovu neukládá.
+          if (same) return gs;
+          const next = withMe({ ...x, ...m, invite: res.invite, owner: res.owner, remote: true });
+          return gs.map((g) => (g.id === id ? next : g));
+        });
       }
       setSyncState('ok');
     } catch {
