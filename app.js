@@ -2474,14 +2474,38 @@ function Root() {
   return html`<${App} key=${user?.id || 'local'} user=${user} recovery=${boot.type === 'recovery'} /><${DialogHost} />`;
 }
 
-// Úvodní animace loga při otevření aplikace (necelá vteřina): šipky se nakreslí, název se rozsvítí po písmenech.
+// Úvodní animace při otevření aplikace. Nejdřív se nakreslí logo (asi 1,7 s), pak „odletí“ na své místo
+// v záhlaví, pozadí se rozplyne a obsah aplikace se k tomu postupně vynoří a lišta vyjede zespodu.
 function intro() {
   if (calm()) return;
+  const body = document.body;
   const layer = document.createElement('div');
   layer.className = 'splash';
-  document.body.appendChild(layer);
-  const done = () => { layer.classList.add('out'); setTimeout(() => layer.remove(), 300); };
-  const fallback = setTimeout(done, 1200);
+  body.appendChild(layer);
+  // intro: obsah aplikace čeká schovaný a jeho animace stojí; intro-hold: skutečné logo v záhlaví je skryté, než doletí to animované.
+  body.classList.add('intro', 'intro-hold');
+  let finished = false;
+  const done = () => {
+    if (finished) return;
+    finished = true;
+    const svg = layer.querySelector('svg');
+    const target = [...document.querySelectorAll('.brand .logo img')].find((el) => el.getBoundingClientRect().width > 0);
+    body.classList.add('intro-go');
+    body.classList.remove('intro');
+    setTimeout(() => body.classList.remove('intro-go'), 1200);
+    if (svg && target) {
+      const a = svg.getBoundingClientRect(), b = target.getBoundingClientRect();
+      const dx = b.left + b.width / 2 - (a.left + a.width / 2), dy = b.top + b.height / 2 - (a.top + a.height / 2);
+      layer.classList.add('fly');
+      svg.style.transform = `translate3d(${dx}px, ${dy}px, 0) scale(${b.width / a.width})`;
+      setTimeout(() => { body.classList.remove('intro-hold'); layer.remove(); }, 760);
+    } else {
+      body.classList.remove('intro-hold');
+      layer.classList.add('out');
+      setTimeout(() => layer.remove(), 450);
+    }
+  };
+  const fallback = setTimeout(done, 2500);
   fetch('brand/logo-dark.svg').then((r) => r.text()).then((txt) => {
     const svg = new DOMParser().parseFromString(txt, 'image/svg+xml').documentElement;
     if (svg.nodeName !== 'svg') throw new Error('logo');
@@ -2494,11 +2518,11 @@ function intro() {
     word.setAttribute('class', 'sp-word');
     [...word.children].forEach((p, i) => {
       p.setAttribute('class', 'sp-l');
-      p.style.animationDelay = `${0.22 + i * 0.022}s`;
+      p.style.animationDelay = `${0.55 + i * 0.05}s`;
     });
     layer.appendChild(document.importNode(svg, true));
     clearTimeout(fallback);
-    setTimeout(done, 800);
+    setTimeout(done, 1700);
   }).catch(() => { clearTimeout(fallback); done(); });
 }
 intro();

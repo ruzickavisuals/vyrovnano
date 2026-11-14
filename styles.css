@@ -758,17 +758,33 @@ mark { background: color-mix(in srgb, var(--accent) 28%, transparent); color: in
 .secret { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; word-break: break-all; user-select: all; -webkit-user-select: all; }
 .auth main h2 { font-size: 20px; }
 
-/* Úvodní animace loga (celá necelou vteřinu) */
-.splash { position: fixed; inset: 0; z-index: 200; background: var(--bg); display: grid; place-items: center; transition: opacity 0.25s ease; }
+/* Úvodní animace: logo se nakreslí, odletí na své místo v záhlaví a aplikace se vynoří */
+.splash { position: fixed; inset: 0; z-index: 200; background-color: var(--bg); display: grid; place-items: center;
+  transition: opacity 0.4s ease, background-color 0.55s ease;
+  --sp-1: #0D1B1A; --sp-2: #00796D; --sp-3: #728A87; }
+@media (prefers-color-scheme: dark) { .splash { --sp-1: #F3F6F4; --sp-2: #7DFFBC; --sp-3: #91A1A4; } }
+:root[data-theme='light'] .splash { --sp-1: #0D1B1A; --sp-2: #00796D; --sp-3: #728A87; }
+:root[data-theme='dark'] .splash { --sp-1: #F3F6F4; --sp-2: #7DFFBC; --sp-3: #91A1A4; }
 .splash.out { opacity: 0; pointer-events: none; }
-.splash svg { width: min(68vw, 340px); height: auto; overflow: visible; transition: transform 0.3s var(--ease); }
-.splash.out svg { transform: scale(1.05); }
+.splash.fly { background-color: transparent; pointer-events: none; }
+.splash svg { width: min(68vw, 340px); height: auto; overflow: visible; will-change: transform; transition: transform 0.72s var(--ease); }
+.splash.out svg { transform: scale(1.06); }
 @keyframes sp-draw { to { stroke-dashoffset: 0; } }
 @keyframes sp-in { to { opacity: 1; } }
-@keyframes sp-slide { from { transform: translateX(-12px); } }
-.sp-a { stroke-dasharray: 107; stroke-dashoffset: 107; animation: sp-draw 0.38s var(--ease) forwards; }
-.sp-a1 { stroke: var(--text); }
-.sp-a2 { stroke: var(--accent); animation-delay: 0.06s; }
-.sp-slash { stroke: var(--muted); opacity: 0; animation: sp-in 0.18s ease 0.2s forwards; }
-.sp-word { fill: var(--text); animation: sp-slide 0.4s var(--ease) 0.2s both; }
-.sp-l { opacity: 0; animation: sp-in 0.2s ease forwards; }
+@keyframes sp-slide { from { transform: translateX(-16px); } }
+.sp-a { stroke-dasharray: 107; stroke-dashoffset: 107; animation: sp-draw 0.65s var(--ease) forwards; }
+.sp-a1 { stroke: var(--sp-1); }
+.sp-a2 { stroke: var(--sp-2); animation-delay: 0.14s; }
+.sp-slash { stroke: var(--sp-3); opacity: 0; animation: sp-in 0.3s ease 0.5s forwards; }
+.sp-word { fill: var(--sp-1); animation: sp-slide 0.8s var(--ease) 0.5s both; }
+.sp-l { opacity: 0; animation: sp-in 0.35s ease forwards; }
+
+/* Aplikace pod úvodní animací čeká; po ní se obsah přiblíží, řádky naskáčou postupně a lišta vyjede zespodu. */
+body.intro #root * { animation-play-state: paused !important; }
+body.intro #root main, body.intro #root .ava-btn { opacity: 0; }
+body.intro #root main { transform: scale(0.94) translate3d(0, 18px, 0); }
+body.intro .tabbar { translate: 0 130%; }
+body.intro-hold .brand .logo { visibility: hidden; }
+body.intro-go #root main { transition: opacity 0.55s ease 0.1s, transform 0.85s var(--ease) 0.05s; transform-origin: 50% 0; }
+body.intro-go #root .ava-btn { transition: opacity 0.5s ease 0.35s; }
+body.intro-go .tabbar { transition: translate 0.75s var(--ease) 0.25s; }
