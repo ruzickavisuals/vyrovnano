@@ -33,7 +33,14 @@ function loadProfile(key) {
   return { name: '' };
 }
 
-const EMOJIS = ['👥', '🏠', '🏔️', '🏖️', '✈️', '🍻', '🎿', '🚗', '🎁', '⚽', '🎪', '💼'];
+const EMOJIS = ['👥', '🏠', '💼', '✈️', '🏖️', '🏔️', '🍻', '🚗', '🎁'];
+// První emoji z napsaného textu (i složené, např. vlajky nebo rodina).
+function firstEmoji(text) {
+  const parts = typeof Intl.Segmenter === 'function'
+    ? [...new Intl.Segmenter('cs', { granularity: 'grapheme' }).segment(text)].map((x) => x.segment)
+    : [...text];
+  return parts.find((p) => /\p{Extended_Pictographic}|\p{Regional_Indicator}/u.test(p)) || '';
+}
 const nameOf = (g, id) => g.members.find((m) => m.id === id)?.name || '?';
 
 /* ---------- Drobné stavební prvky ---------- */
@@ -236,7 +243,29 @@ function pickImage() {
 
 /* ---------- Domovská obrazovka ---------- */
 
-function Home({ groups, profile, account, activeId, onOpen, onNew, onProfile, onImport }) {
+function Home({ groups, profile, account, activeId, onOpen, onNew, onProfile, onImport, onReorder, onSortByName }) {
+  // Přetažení skupiny za úchyt: funguje myší i prstem. Pořadí se mění průběžně podle toho,
+  // nad kterou kartou se ukazatel právě nachází.
+  const [drag, setDrag] = useState(null);
+  const listRef = useRef();
+  const down = (e, id) => {
+    e.preventDefault();
+    try { e.currentTarget.setPointerCapture(e.pointerId); } catch {}
+    setDrag(id);
+  };
+  const move = (e) => {
+    if (!drag) return;
+    const rows = [...listRef.current.querySelectorAll('.group-row')];
+    let over = rows.findIndex((r) => {
+      const b = r.getBoundingClientRect();
+      return e.clientY < b.top + b.height / 2;
+    });
+    if (over < 0) over = rows.length;
+    const from = groups.findIndex((g) => g.id === drag);
+    const to = over > from ? over - 1 : over;
+    if (to !== from) onReorder(from, to);
+  };
+  const up = () => setDrag(null);
   return html`
     <header class="top row">
       <div class="grow">
@@ -254,10 +283,19 @@ function Home({ groups, profile, account, activeId, onOpen, onNew, onProfile, on
           <p>Zatím tu není žádná skupina.</p>
         </div>
       `}
+      ${groups.length > 1 && html`
+        <div class="list-tools">
+          <button class="link-btn" onClick=${onSortByName}>Seřadit podle názvu</button>
+        </div>`}
+      <div class="group-list" ref=${listRef}>
       ${groups.map((g) => {
         const my = balances(g)[g.me] || 0;
         const { total } = stats(g);
         return html`
+          <div class=${'group-row' + (drag === g.id ? ' dragging' : '')} key=${g.id}>
+          ${groups.length > 1 && html`
+            <span class="grip" role="button" aria-label=${'Přesunout skupinu ' + g.name} title="Přetáhni pro změnu pořadí"
+              onPointerDown=${(e) => down(e, g.id)} onPointerMove=${move} onPointerUp=${up} onPointerCancel=${up}>⠿</span>`}
           <button class=${'card group-card' + (g.id === activeId ? ' active' : '')} onClick=${() => onOpen(g.id)}>
             <span class="avatar">${g.emoji}</span>
             <span class="grow">
@@ -269,8 +307,10 @@ function Home({ groups, profile, account, activeId, onOpen, onNew, onProfile, on
               <${Balance} cents=${my} currency=${g.currency} />
             </span>
           </button>
+          </div>
         `;
       })}
+      </div>
       <button class="btn primary wide" onClick=${onNew}>+ Nová skupina</button>
       <button class="btn wide" onClick=${onImport}>Importovat ze Settle Up</button>
     </main>
@@ -670,7 +710,9 @@ function GroupForm({ group, profile, userId, admin, deleteLabel, onSave, onDelet
         <input placeholder="např. Dovolená Chorvatsko" value=${name} onInput=${(e) => setName(e.target.value)} />
       </label>
       <div class="chips">
-        ${EMOJIS.map((e) => html`<button type="button" class=${'chip emoji' + (e === emoji ? ' on' : '')} onClick=${() => setEmoji(e)}>${e}</button>`)}
+        ${[...new Set([...EMOJIS, emoji])].map((e) => html`<button type="button" class=${'chip emoji' + (e === emoji ? ' on' : '')} onClick=${() => setEmoji(e)}>${e}</button>`)}
+        <input class="emoji-input" placeholder="+ vlastní" aria-label="Vlastní emoji" value=""
+          onInput=${(e) => { const g = firstEmoji(e.target.value); if (g) setEmoji(g); e.target.value = ''; }} />
       </div>
       <label class="field">
         <span>Měna skupiny</span>
@@ -1312,7 +1354,9 @@ function App({ user, recovery }) {
       <div class="layout">
         <aside class=${'side' + (group ? ' has-group' : '')}>
           <${Home} groups=${groups} profile=${prof} account=${!!user} activeId=${gid} onOpen=${setGid}
-            onNew=${() => setSheet({ type: 'group' })} onProfile=${() => setSheet({ type: 'profile' })} onImport=${importSettleUp} />
+            onNew=${() => setSheet({ type: 'group' })} onProfile=${() => setSheet({ type: 'profile' })} onImport=${importSettleUp}
+            onReorder=${(from, to) => setGroups((gs) => { const a = [...gs]; const [x] = a.splice(from, 1); a.splice(to, 0, x); return a; })}
+            onSortByName=${() => setGroups((gs) => [...gs].sort((a, b) => a.name.localeCompare(b.name, 'cs', { sensitivity: 'base' })))} />
         </aside>
         <section class="main-pane">
           ${group

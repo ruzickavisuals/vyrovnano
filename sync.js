@@ -98,7 +98,7 @@ export function sanitize(d) {
   if (d.dead && typeof d.dead === 'object') {
     for (const [k, v] of Object.entries(d.dead).slice(0, 5000)) if (okId(k) && Number.isFinite(v)) dead[k] = v;
   }
-  return { name: str(d.name, 80) || 'Skupina', emoji: str(d.emoji, 8) || '👥', currency: cur(d.currency), members, entries, dead, mu: num(d.mu) };
+  return { name: str(d.name, 80) || 'Skupina', emoji: str(d.emoji, 16) || '👥', currency: cur(d.currency), members, entries, dead, mu: num(d.mu) };
 }
 
 // Otisk sdílené části skupiny – podle něj poznáme, jestli je co synchronizovat.
