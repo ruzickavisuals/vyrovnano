@@ -390,7 +390,7 @@ function DateField({ value, onChange }) {
 }
 
 function Balance({ cents, currency, zero }) {
-  // Barvy stavů v celé aplikaci: vyrovnáno = zelená, dlužím = červená, mám dostat = klidná modrá.
+  // Barvy stavů v celé aplikaci: vyrovnáno = zelená, dlužím = červená, mám dostat = zelená.
   if (!cents) return zero ? html`<span class="muted">${zero}</span>` : html`<span class="pos">vyrovnáno ✓</span>`;
   return html`<span class=${cents > 0 ? 'recv' : 'neg'}>${cents > 0 ? '+' : '−'}${fmt(Math.abs(cents), currency)}</span>`;
 }
