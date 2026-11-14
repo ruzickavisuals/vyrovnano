@@ -389,9 +389,10 @@ function DateField({ value, onChange }) {
   `;
 }
 
-function Balance({ cents, currency, zero = 'vyrovnáno' }) {
-  if (!cents) return html`<span class="muted">${zero}</span>`;
-  return html`<span class=${cents > 0 ? 'pos' : 'neg'}>${cents > 0 ? '+' : '−'}${fmt(Math.abs(cents), currency)}</span>`;
+function Balance({ cents, currency, zero }) {
+  // Barvy stavů v celé aplikaci: vyrovnáno = zelená, dlužím = červená, mám dostat = klidná modrá.
+  if (!cents) return zero ? html`<span class="muted">${zero}</span>` : html`<span class="pos">vyrovnáno ✓</span>`;
+  return html`<span class=${cents > 0 ? 'recv' : 'neg'}>${cents > 0 ? '+' : '−'}${fmt(Math.abs(cents), currency)}</span>`;
 }
 
 function Avatar({ m, size = 32 }) {
@@ -622,7 +623,7 @@ function useWelcome(groups, name) {
     ? html`Zatím tu nemáš žádnou skupinu. Vytvoř první.`
     : lines.length === 0
       ? html`<span class="pos">Se všemi jsi vyrovnaný.</span> Užij si ten vzácný pocit.`
-      : html`${lines.map(([cur, v], i) => html`${i ? ' a ' : ''}${v > 0 ? 'Celkem ti lidi dluží ' : 'Celkem dlužíš '}<strong class=${v > 0 ? 'pos' : 'neg'}>${fmt(Math.abs(v), cur)}</strong>`)}.`;
+      : html`${lines.map(([cur, v], i) => html`${i ? ' a ' : ''}${v > 0 ? 'Celkem ti lidi dluží ' : 'Celkem dlužíš '}<strong class=${v > 0 ? 'recv' : 'neg'}>${fmt(Math.abs(v), cur)}</strong>`)}.`;
   return { quip, greeting: `${hello}${name ? `, ${vocative(name)}` : ''}`, sum };
 }
 
@@ -710,7 +711,7 @@ function GroupView({ group, onBack, onEdit, onShare, onEntry, onAdd, onPay, onQr
         </div>
         <div class="right">
           <small>${my > 0 ? 'Dostaneš zpět' : my < 0 ? 'Dlužíš' : 'Tvůj stav'}</small>
-          <strong class=${my > 0 ? 'pos' : my < 0 ? 'neg' : ''}>${my
+          <strong class=${my > 0 ? 'recv' : my < 0 ? 'neg' : 'pos'}>${my
             ? html`<${CountUp} value=${Math.abs(my)} format=${(v) => fmt(v, cur)} />` : 'Vyrovnáno ✓'}</strong>
         </div>
       </div>
@@ -838,7 +839,7 @@ function Debts({ group, bal, onPay, onQr, onMove }) {
             <span class="bal-bar">
               ${v !== 0 && html`<i class=${v > 0 ? 'p' : 'n'} style=${`width:${(Math.abs(v) / max) * 50}%`}></i>`}
             </span>
-            <span class="bal-val"><${Balance} cents=${v} currency=${cur} zero="0" /></span>
+            <span class="bal-val"><${Balance} cents=${v} currency=${cur} /></span>
           </div>
         `;
       })}
@@ -1394,7 +1395,7 @@ function AllDebts({ groups, onOpen }) {
   return html`
     <div class="form">
       <div class="two">
-        <div class="card set-card tile"><small class="muted">Dostaneš</small><strong class="pos">${total(get)}</strong></div>
+        <div class="card set-card tile"><small class="muted">Dostaneš</small><strong class="recv">${total(get)}</strong></div>
         <div class="card set-card tile"><small class="muted">Dlužíš</small><strong class="neg">${total(owe)}</strong></div>
       </div>
       ${rows.length === 0
@@ -1408,7 +1409,7 @@ function AllDebts({ groups, onOpen }) {
                   <strong>${other?.name || '?'}</strong>
                   <small class="muted">${mine ? 'dluží ti' : 'dlužíš'} · ${g.emoji} ${g.name}</small>
                 </span>
-                <span class="right"><strong class=${mine ? 'pos' : 'neg'}>${mine ? '+' : '−'}${fmt(p.amount, g.currency)}</strong></span>
+                <span class="right"><strong class=${mine ? 'recv' : 'neg'}>${mine ? '+' : '−'}${fmt(p.amount, g.currency)}</strong></span>
               </button>`)}
           </div>
           <p class="hint">Klepnutím otevřeš skupinu, kde dluh uhradíš, pošleš QR platbu nebo ho převedeš jinam.</p>`}
