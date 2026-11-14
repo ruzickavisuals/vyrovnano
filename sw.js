@@ -1,6 +1,6 @@
 // Offline režim: nejdřív síť (ať je vždy čerstvá verze), při výpadku poslední uložená kopie.
 // Ukládají se jen soubory aplikace – nikdy data účtu ani skupin ze serveru.
-const CACHE = 'vyrovnano-v7';
+const CACHE = 'vyrovnano-v8';
 
 self.addEventListener('install', () => self.skipWaiting());
 self.addEventListener('activate', (e) =>

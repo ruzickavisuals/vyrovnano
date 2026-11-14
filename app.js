@@ -2470,6 +2470,35 @@ function Root() {
   return html`<${App} key=${user?.id || 'local'} user=${user} recovery=${boot.type === 'recovery'} /><${DialogHost} />`;
 }
 
+// Úvodní animace loga při otevření aplikace (asi 1,7 s): šipky se nakreslí, název se rozsvítí po písmenech.
+function intro() {
+  if (calm()) return;
+  const layer = document.createElement('div');
+  layer.className = 'splash';
+  document.body.appendChild(layer);
+  const done = () => { layer.classList.add('out'); setTimeout(() => layer.remove(), 450); };
+  const fallback = setTimeout(done, 2500);
+  fetch('brand/logo-dark.svg').then((r) => r.text()).then((txt) => {
+    const svg = new DOMParser().parseFromString(txt, 'image/svg+xml').documentElement;
+    if (svg.nodeName !== 'svg') throw new Error('logo');
+    svg.removeAttribute('width');
+    svg.removeAttribute('height');
+    const [arrows, slash, word] = [...svg.children].filter((n) => n.nodeName !== 'title');
+    arrows.children[0].setAttribute('class', 'sp-a sp-a1');
+    arrows.children[1].setAttribute('class', 'sp-a sp-a2');
+    slash.setAttribute('class', 'sp-slash');
+    word.setAttribute('class', 'sp-word');
+    [...word.children].forEach((p, i) => {
+      p.setAttribute('class', 'sp-l');
+      p.style.animationDelay = `${0.55 + i * 0.05}s`;
+    });
+    layer.appendChild(document.importNode(svg, true));
+    clearTimeout(fallback);
+    setTimeout(done, 1700);
+  }).catch(() => { clearTimeout(fallback); done(); });
+}
+intro();
+
 render(html`<${Root} />`, document.getElementById('root'));
 
 // Telefon: aplikace se nemá zvětšovat štípnutím ani dvojím klepnutím, stejně jako nativní.
