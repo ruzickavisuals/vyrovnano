@@ -806,11 +806,5 @@ body.intro-go .tabbar { transition: translate 0.75s var(--ease) 0.25s; }
 .all-entries .day:first-of-type { margin-top: 4px; }
 .all-entries .search-sum { align-items: center; }
 
-/* Nenápadné oznámení o nové verzi aplikace */
-.update-bar { position: fixed; z-index: 150; left: 0; right: 0; margin: 0 auto; width: max-content; max-width: calc(100vw - 32px);
-  top: calc(env(safe-area-inset-top) + 10px);
-  padding: 9px 16px; border-radius: 999px; background: var(--accent); color: var(--on-accent); font-size: 13px; font-weight: 700;
-  box-shadow: 0 6px 20px rgb(0 0 0 / 0.3); animation: rise 0.3s var(--ease) both; white-space: nowrap; }
-
 .stamp { text-align: center; }
 .stamp strong { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }

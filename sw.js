@@ -1,5 +1,5 @@
 // Rychlý start i offline: soubory aplikace se berou rovnou z paměti zařízení a na pozadí se
-// při každém otevření stáhne čerstvá verze. Vymění se celá najednou (nikdy napůl) a platí od dalšího otevření.
+// při každém otevření stáhne čerstvá verze. Vymění se celá najednou (nikdy napůl) a aplikace se na ni sama přepne.
 // Ukládají se jen soubory aplikace – nikdy data účtu ani skupin ze serveru.
 const CACHE = 'vyrovnano-v13';
 const ASSETS = [
@@ -7,7 +7,6 @@ const ASSETS = [
   'vendor/preact-htm.js', 'vendor/qrcode.js', 'manifest.webmanifest', 'privacy.html',
   'brand/logo-dark.svg', 'brand/logo-light.svg', 'brand/icon-32.png', 'brand/icon-180.png', 'brand/icon-192.png', 'brand/icon-512.png',
 ];
-const stamp = (res) => (res && (res.headers.get('etag') || res.headers.get('last-modified'))) || '';
 
 let refreshing = null;
 function refreshAll() {
@@ -15,11 +14,17 @@ function refreshAll() {
     const fresh = await Promise.all(ASSETS.map((u) => fetch(u, { cache: 'no-cache' })));
     if (!fresh.every((r) => r.ok)) return;
     const cache = await caches.open(CACHE);
-    const old = await Promise.all(ASSETS.map((u) => cache.match(u)));
-    const changed = old.some((o, i) => o && stamp(o) !== stamp(fresh[i]));
+    // Změnu poznáme porovnáním obsahu kódu a stylů (ne podle hlaviček, ty se můžou lišit i u stejného souboru).
+    const isCode = (u) => u === './' || /\.(js|css|html)$/.test(u);
+    const body = (r) => (r ? r.clone().text() : Promise.resolve(null));
+    const before = await Promise.all(ASSETS.map((u) => (isCode(u) ? cache.match(u).then(body) : null)));
+    const after = await Promise.all(ASSETS.map((u, i) => (isCode(u) ? body(fresh[i]) : null)));
+    const changed = before.some((b, i) => b !== null && b !== after[i]);
     await Promise.all(fresh.map((r, i) => cache.put(ASSETS[i], r)));
-    // Otevřené aplikaci dáme vědět, že je připravená novější verze.
-    if (changed) (await self.clients.matchAll({ type: 'window' })).forEach((c) => c.postMessage({ type: 'updated' }));
+    // Otevřené aplikaci dáme vědět, že je připravená novější verze; sama se v klidné chvíli znovu načte.
+    if (changed) {
+      (await self.clients.matchAll({ type: 'window', includeUncontrolled: true })).forEach((c) => c.postMessage({ type: 'updated' }));
+    }
   })().catch(() => {}).finally(() => { refreshing = null; });
   return refreshing;
 }
@@ -49,6 +54,9 @@ self.addEventListener('fetch', (e) => {
   );
   if (nav) e.waitUntil(refreshAll());
 });
+
+// Aplikace se po návratu z pozadí ptá, jestli není novější verze.
+self.addEventListener('message', (e) => { if (e.data?.type === 'check') e.waitUntil(refreshAll()); });
 
 // Notifikace: zobrazení zprávy ze serveru a otevření aplikace po klepnutí.
 self.addEventListener('push', (e) => {

@@ -2733,6 +2733,10 @@ function Root() {
 // Úvodní animace při otevření aplikace. Nejdřív se nakreslí logo (asi 1,7 s), pak „odletí“ na své místo
 // v záhlaví, pozadí se rozplyne a obsah aplikace se k tomu postupně vynoří a lišta vyjede zespodu.
 function intro() {
+  // Po automatickém přepnutí na novou verzi se úvodní animace nepřehrává podruhé.
+  try {
+    if (sessionStorage.getItem('vyrovnano.skipIntro')) { sessionStorage.removeItem('vyrovnano.skipIntro'); return; }
+  } catch {}
   if (calm()) return;
   const body = document.body;
   const layer = document.createElement('div');
@@ -2792,13 +2796,38 @@ for (const type of ['gesturestart', 'gesturechange', 'gestureend']) {
 
 if ('serviceWorker' in navigator && !['localhost', '127.0.0.1'].includes(location.hostname)) {
   navigator.serviceWorker.register('./sw.js').catch(() => {});
-  // Na pozadí se stáhla novější verze aplikace: nabídneme ji malým nenápadným tlačítkem.
+  // Na pozadí se stáhla novější verze aplikace. Přepneme na ni sami, bez tlačítka:
+  //  - hned, pokud se aplikace právě otevřela a ještě na nic nikdo nesáhl,
+  //  - jinak při příštím návratu do aplikace (když není rozdělaný žádný formulář).
+  // Rozdělaná data se neztratí: skupiny se průběžně ukládají v zařízení.
+  let freshSince = Date.now(); // kdy se aplikace otevřela nebo se do ní uživatel naposledy vrátil
+  let checkedAt = Date.now();
+  let touched = false;
+  let pending = false;
+  for (const t of ['pointerdown', 'keydown']) addEventListener(t, () => { touched = true; }, { capture: true, passive: true });
+  const applyUpdate = () => {
+    try {
+      // Pojistka proti opakovanému načítání dokola: nejvýš jednou za minutu.
+      if (Date.now() - Number(sessionStorage.getItem('vyrovnano.updated') || 0) < 60000) return;
+      sessionStorage.setItem('vyrovnano.updated', String(Date.now()));
+      sessionStorage.setItem('vyrovnano.skipIntro', '1');
+    } catch {}
+    location.reload();
+  };
   navigator.serviceWorker.addEventListener('message', (e) => {
-    if (e.data?.type !== 'updated' || document.querySelector('.update-bar')) return;
-    const b = document.createElement('button');
-    b.className = 'update-bar';
-    b.textContent = 'Je tu nová verze · Načíst';
-    b.onclick = () => location.reload();
-    document.body.appendChild(b);
+    if (e.data?.type !== 'updated') return;
+    if (!touched && Date.now() - freshSince < 10000 && !document.querySelector('.sheet, .dialog')) applyUpdate();
+    else pending = true;
+  });
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState !== 'visible') return;
+    if (pending && !document.querySelector('.sheet, .dialog')) return applyUpdate();
+    // Telefon aplikaci často jen uspí. Při návratu se proto zeptáme, jestli není novější verze (nejvýš jednou za 10 minut).
+    freshSince = Date.now();
+    touched = false;
+    if (Date.now() - checkedAt > 600000) {
+      checkedAt = Date.now();
+      navigator.serviceWorker.controller?.postMessage({ type: 'check' });
+    }
   });
 }
