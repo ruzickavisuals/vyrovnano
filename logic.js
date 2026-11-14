@@ -142,7 +142,7 @@ export function settle(bal) {
 // Směr se nikdy neotáčí: kdo dlužil, dluží dál, jen v jiné skupině.
 export function debtMove(source, target, pay, debtorIn, creditorIn, now = Date.now()) {
   const mv = uid();
-  const base = { kind: 'transfer', amount: pay.amount, rate: 1, mode: 'equal', category: 'other', date: today(), u: now, mv };
+  const base = { kind: 'transfer', amount: pay.amount, rate: 1, mode: 'equal', category: 'other', date: today(), u: now, c: now, mv };
   return {
     out: { ...base, id: uid(), mvd: 'out', mvg: target.id, currency: source.currency,
       title: `Převedeno do skupiny „${target.name}“`.slice(0, 120), paidBy: pay.from, parts: { [pay.to]: 1 } },

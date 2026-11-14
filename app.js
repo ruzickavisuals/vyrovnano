@@ -820,7 +820,7 @@ function LogRow({ group, l }) {
 }
 
 // Kolik posledních záznamů a úprav je vidět přímo ve skupině; zbytek je v samostatném okně.
-const RECENT_ENTRIES = 8;
+const RECENT_ENTRIES = 5;
 const RECENT_LOG = 5;
 
 function Entries({ group, onEntry, onDelete, onAll, onLog }) {
@@ -1212,6 +1212,7 @@ function EntryForm({ group, entry, onSave, onDelete }) {
         </div>
       `}
 
+      ${entry && html`<${EntryStamp} group=${group} entry=${entry} />`}
       <button class="btn primary wide" disabled=${!!error}>${error || (entry ? 'Uložit změny' : 'Přidat')}</button>
       ${entry && html`<button type="button" class="btn danger wide" onClick=${onDelete}>Smazat</button>`}
     </form>
@@ -1636,6 +1637,20 @@ function MoveSheet({ group, groups, pay, onMove }) {
 
 // Záznam o převedeném dluhu se neupravuje (musel by se měnit v obou skupinách zároveň),
 // dá se jen smazat – a to vždy v obou skupinách najednou.
+// Kdy (a kdo) záznam zadal a kdy byl naposledy upraven. Čas zadání se ukládá od 14. 11. 2026;
+// u starších záznamů známe jen čas posledního uložení.
+function EntryStamp({ group, entry }) {
+  const who = entry.cb && group.members.find((m) => m.id === entry.cb)?.name;
+  const edited = entry.c && entry.u - entry.c > 60000;
+  if (!entry.c && !entry.u) return null;
+  return html`
+    <p class="hint stamp">
+      ${entry.c
+        ? html`${who ? `Zadal(a) ${who}` : 'Zadáno'} <strong>${logTime(entry.c)}</strong>${edited ? html` · naposledy upraveno <strong>${logTime(entry.u)}</strong>` : ''}`
+        : html`Naposledy uloženo <strong>${logTime(entry.u)}</strong>. Přesný čas zadání se u starších záznamů neukládal.`}
+    </p>`;
+}
+
 function MovedInfo({ group, entry, other, onDelete }) {
   const to = Object.keys(entry.parts)[0];
   const debtor = entry.mvd === 'in' ? to : entry.paidBy;
@@ -1646,6 +1661,7 @@ function MovedInfo({ group, entry, other, onDelete }) {
       <p>${entry.mvd === 'in'
         ? `Tento dluh sem byl převeden ze skupiny „${other ? other.name : 'ke které nemáš přístup'}“, kde tím zmizel.`
         : `Tento dluh byl odsud převeden do skupiny „${other ? other.name : 'ke které nemáš přístup'}“, kde se připočetl.`}</p>
+      <${EntryStamp} group=${group} entry=${entry} />
       <p class="hint">Převod má dvě části, v každé skupině jednu. Mazat je jde jen společně, aby dluh nikde nezmizel ani nepřibyl navíc.</p>
       <button class="btn danger wide" onClick=${onDelete}>Zrušit převod v obou skupinách</button>
     </div>
@@ -2362,8 +2378,10 @@ function App({ user, recovery }) {
     putGroup(out);
   }
   const saveEntry = (e, note, type = 'entry') => {
-    const entry = { ...e, u: Date.now() };
     const old = group.entries.find((x) => x.id === e.id);
+    const now = Date.now();
+    // c = kdy byl záznam zadán, cb = kdo ho zadal; při úpravách se nemění.
+    const entry = { ...e, u: now, c: old ? old.c : now, cb: old ? old.cb : group.me || undefined };
     const has = !!old;
     const what = e.kind === 'transfer' ? 'převod' : e.kind === 'income' ? 'příjem' : 'výdaj';
     const text = note || `${has ? 'upraven' : 'nový'} ${what} „${e.title}“ (${fmt(e.amount, e.currency)})`;
@@ -2418,6 +2436,8 @@ function App({ user, recovery }) {
     const msg = `Převést dluh ${amount} do skupiny „${target.name}“? ${nameOf(group, pay.from)} bude dál dlužit ${nameOf(group, pay.to)}, jen v jiné skupině: tady dluh zmizí a tam se připočte.`;
     if (!(await ask(msg, { ok: 'Převést' }))) return;
     const pair = debtMove(group, target, pay, f, t);
+    pair.out.cb = group.me || undefined;
+    pair.in.cb = target.me || undefined;
     announce(group, `dluh ${amount} (${nameOf(group, pay.from)} → ${nameOf(group, pay.to)}) převeden do skupiny „${target.name}“`, 'paid', [pay.from, pay.to]);
     announce(target, `dluh ${amount} (${f.name} → ${t.name}) převeden ze skupiny „${group.name}“`, 'paid', [f.id, t.id]);
     setGroups((gs) => gs.map((g) => (

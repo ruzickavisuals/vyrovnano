@@ -114,6 +114,9 @@ export function sanitize(d) {
       category: str(e.category, 20),
       date: /^\d{4}-\d{2}-\d{2}$/.test(e.date) ? e.date : today(),
       u: num(e.u),
+      // kdy a kým byl záznam zadán (u starších záznamů chybí)
+      c: num(e.c) > 0 ? Math.round(e.c) : undefined,
+      cb: okId(e.cb) && ids.has(e.cb) ? e.cb : undefined,
       // vazba dvou částí převodu dluhu mezi skupinami
       mv: okId(e.mv) ? e.mv : undefined,
       mvg: okId(e.mvg) ? e.mvg : undefined,
