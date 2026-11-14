@@ -651,3 +651,13 @@ mark { background: color-mix(in srgb, var(--accent) 28%, transparent); color: in
   .sheet.pulling { box-shadow: 0 -12px 40px rgb(0 0 0 / 0.5); }
   .overlay:has(.sheet.pulling) { background: color-mix(in srgb, var(--bg) 70%, transparent); }
 }
+
+/* ---------- Gesto zpět: obrazovka jede s prstem a odkrývá tu pod sebou ---------- */
+@media (max-width: 899px) {
+  /* Návrat ze skupiny: seznam skupin se ukáže pod odjíždějící skupinou. */
+  .peek-back .side.has-group { display: block; position: fixed; inset: 0; z-index: 0; overflow: hidden; max-width: 520px; margin: 0 auto; background: var(--bg); }
+  .peek-back .main-pane { position: relative; z-index: 1; min-height: 100dvh; background: var(--bg); box-shadow: -14px 0 40px rgb(0 0 0 / 0.45); will-change: transform; }
+  /* Zavření okna: pod oknem je vidět obrazovka, ze které bylo otevřeno. */
+  .peek-sheet .overlay:not(.dialog-overlay) { background: transparent; }
+  .peek-sheet .sheet { box-shadow: -14px 0 40px rgb(0 0 0 / 0.45); will-change: transform; }
+}

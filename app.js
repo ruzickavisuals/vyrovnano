@@ -84,7 +84,7 @@ function Sheet({ title, onClose, children }) {
   // Dotyk: okno jde zavřít stažením záhlaví dolů, stejně jako v nativních aplikacích.
   const [dy, setDy] = useState(0);
   const start = useRef(null);
-  const down = (e) => { if (e.pointerType !== 'mouse' && !e.target.closest('button')) start.current = e.clientY; };
+  const down = (e) => { if (e.pointerType !== 'mouse' && e.clientX > 26 && !e.target.closest('button')) start.current = e.clientY; };
   const move = (e) => { if (start.current !== null) setDy(Math.max(0, e.clientY - start.current)); };
   const up = () => {
     if (start.current === null) return;
@@ -1621,24 +1621,74 @@ function App({ user, recovery }) {
 
   const group = groups.find((g) => g.id === gid);
   const close = () => setSheet(null);
-  // Dotyk: tažení od levého okraje doprava = zpět (zavře okno, jinak se vrátí na seznam skupin).
+  // Dotyk: tažení od levého okraje doprava = zpět. Aktuální obrazovka (okno, nebo skupina) jede
+  // s prstem a pod ní je vidět ta, na kterou se vracíš. Po puštění buď dojede pryč, nebo se vrátí.
   const sheetRef = useRef(sheet);
   sheetRef.current = sheet;
   useEffect(() => {
     let st = null;
-    const start = (e) => { const t = e.touches[0]; st = t.clientX <= 26 ? { x: t.clientX, y: t.clientY } : null; };
-    const end = (e) => {
+    const root = document.documentElement;
+    const start = (e) => {
+      const t = e.touches[0];
+      if (t.clientX > 26 || e.touches.length > 1 || document.querySelector('.dialog')) return;
+      const el = sheetRef.current
+        ? document.querySelector('.overlay:not(.dialog-overlay) .sheet')
+        : gidRef.current ? document.querySelector('.main-pane') : null;
+      if (el) st = { x: t.clientX, y: t.clientY, el, sheet: !!sheetRef.current, on: false, dx: 0, under: sheetRef.current ? null : document.querySelector('.side') };
+    };
+    const move = (e) => {
       if (!st) return;
-      const t = e.changedTouches[0];
-      const dx = t.clientX - st.x, dy = Math.abs(t.clientY - st.y);
+      const t = e.touches[0];
+      const dx = t.clientX - st.x, dy = t.clientY - st.y;
+      if (!st.on) {
+        if (Math.abs(dy) > 12 && Math.abs(dy) > Math.abs(dx)) { st = null; return; } // svislý pohyb = rolování
+        if (dx < 8) return;
+        st.on = true;
+        root.classList.add(st.sheet ? 'peek-sheet' : 'peek-back');
+        st.el.style.transition = 'none';
+        if (st.under) st.under.style.transition = 'none';
+      }
+      e.preventDefault();
+      st.dx = Math.max(0, dx);
+      st.el.style.transform = `translateX(${st.dx}px)`;
+      if (st.under) {
+        // Spodní obrazovka lehce „dojíždí“ zleva a rozjasňuje se.
+        const p = Math.min(1, st.dx / innerWidth);
+        st.under.style.transform = `translateX(${Math.round(-60 * (1 - p))}px)`;
+        st.under.style.opacity = String(0.55 + 0.45 * p);
+      }
+    };
+    const end = () => {
+      const s = st;
       st = null;
-      if (dx < 80 || dy > 70) return;
-      if (sheetRef.current) setSheet(null);
-      else if (gidRef.current) setGid(null);
+      if (!s || !s.on) return;
+      const go = s.dx > Math.min(130, innerWidth * 0.33);
+      s.el.style.transition = 'transform 0.22s ease-out';
+      s.el.style.transform = go ? 'translateX(100%)' : 'translateX(0)';
+      if (s.under) {
+        s.under.style.transition = 'transform 0.22s ease-out, opacity 0.22s ease-out';
+        s.under.style.transform = go ? 'translateX(0)' : 'translateX(-60px)';
+        s.under.style.opacity = go ? '1' : '0.55';
+      }
+      setTimeout(() => {
+        if (go) { if (s.sheet) setSheet(null); else setGid(null); }
+        // Úklid až po překreslení, aby obrazovka neproblikla.
+        requestAnimationFrame(() => {
+          root.classList.remove('peek-sheet', 'peek-back');
+          for (const el of [s.el, s.under]) if (el) { el.style.transition = ''; el.style.transform = ''; el.style.opacity = ''; }
+        });
+      }, 230);
     };
     document.addEventListener('touchstart', start, { passive: true });
+    document.addEventListener('touchmove', move, { passive: false });
     document.addEventListener('touchend', end, { passive: true });
-    return () => { document.removeEventListener('touchstart', start); document.removeEventListener('touchend', end); };
+    document.addEventListener('touchcancel', end, { passive: true });
+    return () => {
+      document.removeEventListener('touchstart', start);
+      document.removeEventListener('touchmove', move);
+      document.removeEventListener('touchend', end);
+      document.removeEventListener('touchcancel', end);
+    };
   }, []);
   // Klávesové zkratky pro hledání: „/“ nebo Ctrl/Cmd + K (když se zrovna nepíše do pole).
   useEffect(() => {
