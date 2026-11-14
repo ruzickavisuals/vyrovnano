@@ -5,7 +5,7 @@ import {
 } from './logic.js';
 import {
   syncEnabled, shared, canon, merge, sanitize, sig, listRemote, joinRemote, leaveRemote,
-  resetInvite, kickRemote, deleteAccount, groupUserIds, syncGroup, listBackups, getBackup, isAdmin,
+  resetInvite, kickRemote, deleteAccount, groupUserIds, syncGroup, listBackups, getBackup, isAdmin, savePushSub, deletePushSub,
 } from './sync.js';
 import {
   getSession, onAuthChange, signUp, signIn, signInWithGoogle, sendPasswordReset,
@@ -14,6 +14,7 @@ import {
 import { GOOGLE_LOGIN } from './config.js';
 import { parseSettleUp, decodeText } from './import.js';
 import { EMOJI, COLORS } from './emoji.js';
+import { pushSupported, isStandalone, isIos, pushState, enablePush, disablePush, notifyGroup } from './push.js';
 
 const KEY = 'vyrovnano.v1';
 const JKEY = 'vyrovnano.join';
@@ -1494,6 +1495,47 @@ function PasswordForm({ label = 'Změnit heslo', onDone }) {
   `;
 }
 
+// Zapnutí a vypnutí notifikací na tomto zařízení.
+function PushSettings() {
+  const [state, setState] = useState('loading'); // loading | unsupported | denied | on | off
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState('');
+  useEffect(() => { pushState().then(setState).catch(() => setState('unsupported')); }, []);
+  async function toggle() {
+    setBusy(true);
+    setMsg('');
+    try {
+      if (state === 'on') await disablePush(deletePushSub);
+      else await enablePush(savePushSub);
+      setState(await pushState());
+    } catch (e) {
+      setMsg(Notification.permission === 'denied'
+        ? 'Notifikace jsou pro tuhle aplikaci zakázané v nastavení telefonu.'
+        : 'Notifikace se nepodařilo zapnout. Zkus to prosím znovu.');
+      setState(await pushState().catch(() => 'off'));
+    }
+    setBusy(false);
+  }
+  const needsInstall = state === 'unsupported' && isIos() && !isStandalone();
+  return html`
+    <section class="card set-card">
+      <h3>Notifikace</h3>
+      ${state === 'unsupported'
+        ? html`<p class="hint">${needsInstall
+            ? 'Na iPhonu fungují notifikace jen v aplikaci přidané na plochu. V Safari klepni na Sdílet → Přidat na plochu a otevři Vyrovnáno odtamtud.'
+            : 'Tento prohlížeč notifikace nepodporuje.'}</p>`
+        : html`
+          <div class="row">
+            <span class="grow">${state === 'on' ? 'Na tomto zařízení zapnuté' : state === 'denied' ? 'Zakázané v nastavení zařízení' : 'Na tomto zařízení vypnuté'}</span>
+            <button class=${'btn small' + (state === 'on' ? '' : ' primary')} disabled=${busy || state === 'loading' || state === 'denied'} onClick=${toggle}>
+              ${busy ? 'Moment…' : state === 'on' ? 'Vypnout' : 'Zapnout'}
+            </button>
+          </div>
+          <p class="hint">${msg || 'Dostaneš zprávu, když někdo ve tvé skupině přidá, upraví nebo smaže výdaj, uhradí dluh nebo se připojí. Vlastní změny ti nechodí.'}</p>`}
+    </section>
+  `;
+}
+
 function ProfileSheet({ profile, user, admin, groupCount, onSave, onLogout, onDeleteAccount, onImport, onExportAll }) {
   const [name, setName] = useState(profile.name);
   const [avatar, setAvatar] = useState(profile.avatar);
@@ -1553,6 +1595,8 @@ function ProfileSheet({ profile, user, admin, groupCount, onSave, onLogout, onDe
           <${Seg} value=${theme} onChange=${setTheme} options=${[['auto', 'Podle systému'], ['light', 'Světlý'], ['dark', 'Tmavý']]} />
         </div>
       </section>
+
+      ${user && html`<${PushSettings} />`}
 
       <button class="btn primary wide" disabled=${!dirty || ibanBad}
         onClick=${() => onSave({ name: name.trim(), avatar, iban: iban.trim(), currency, theme })}>
@@ -1674,6 +1718,13 @@ function App({ user, recovery }) {
   gidRef.current = gid;
   const busy = useRef({});
   const synced = useRef({});
+  // Zprávy pro ostatní členy čekají, až se změna uloží na server; pak se odešlou jako notifikace.
+  const outbox = useRef({});
+  const announce = (g, text) => {
+    if (!user || !g) return;
+    const who = g.members.find((m) => m.id === g.me)?.name || prof.name || 'Někdo';
+    (outbox.current[g.id] = outbox.current[g.id] || { name: g.name, items: [] }).items.push(`${who}: ${text}`);
+  };
   const leaving = useRef(false);
 
   useEffect(() => { if (!leaving.current) localStorage.setItem(gkey, JSON.stringify(groups)); }, [groups]);
@@ -1782,6 +1833,11 @@ function App({ user, recovery }) {
         setGid((cur) => (cur === id ? null : cur));
       } else {
         synced.current[id] = canon(res.data);
+        const box = outbox.current[id];
+        if (box) {
+          delete outbox.current[id];
+          notifyGroup(id, box.name, box.items.length === 1 ? box.items[0] : `${box.items[0]} (a další změny: ${box.items.length - 1})`);
+        }
         // Sloučíme znovu s aktuálním stavem, kdyby uživatel mezitím něco změnil.
         setGroups((gs) => {
           const x = gs.find((g) => g.id === id);
@@ -1890,9 +1946,11 @@ function App({ user, recovery }) {
     }
     putGroup(out);
   }
-  const saveEntry = (e) => {
+  const saveEntry = (e, note) => {
     const entry = { ...e, u: Date.now() };
     const has = group.entries.some((x) => x.id === e.id);
+    const what = e.kind === 'transfer' ? 'převod' : e.kind === 'income' ? 'příjem' : 'výdaj';
+    announce(group, note || `${has ? 'upraven' : 'nový'} ${what} „${e.title}“ (${fmt(e.amount, e.currency)})`);
     putGroup({ ...group, entries: has ? group.entries.map((x) => (x.id === e.id ? entry : x)) : [...group.entries, entry] });
   };
   // Mazání a zápis platby jsou špatně vratné, proto se vždy ptáme.
@@ -1910,11 +1968,14 @@ function App({ user, recovery }) {
       }
       const where = e.mvd === 'in' ? `vrátí do skupiny „${other.name}“` : `vrátí sem ze skupiny „${other.name}“`;
       if (!(await ask(`Zrušit převod dluhu ${fmt(e.amount, e.currency)}? Smaže se v obou skupinách a dluh se ${where}.`, { ok: 'Zrušit převod' }))) return;
+      announce(group, `zrušen převod dluhu ${fmt(e.amount, e.currency)}`);
+      if (twin) announce(other, `zrušen převod dluhu ${fmt(e.amount, e.currency)}`);
       setGroups((gs) => gs.map((g) => (
         g.id === group.id ? drop(g, e.id) : twin && g.id === other.id ? drop(g, twin.id) : g)));
       return close();
     }
     if (!(await ask(`Opravdu smazat záznam „${e.title || 'Převod'}“ (${fmt(e.amount, e.currency)})? Zmizí všem členům skupiny.`, { ok: 'Smazat' }))) return;
+    announce(group, `smazán záznam „${e.title || 'Převod'}“ (${fmt(e.amount, e.currency)})`);
     putGroup(drop(group, id));
   }
   async function payDebt(p) {
@@ -1923,7 +1984,7 @@ function App({ user, recovery }) {
     saveEntry({
       id: uid(), kind: 'transfer', title: 'Převod', amount: p.amount, currency: group.currency, rate: 1,
       paidBy: p.from, mode: 'equal', parts: { [p.to]: 1 }, category: 'other', date: today(),
-    });
+    }, `uhrazeno ${fmt(p.amount, group.currency)} (${nameOf(group, p.from)} → ${nameOf(group, p.to)})`);
   }
   // Převod dluhu: tady vznikne převod, který dluh vyrovná, a v cílové skupině opačný převod,
   // který tam stejný dluh založí. Do statistik útraty se ani jeden nepočítá.
@@ -1932,6 +1993,8 @@ function App({ user, recovery }) {
     const msg = `Převést dluh ${amount} do skupiny „${target.name}“? ${nameOf(group, pay.from)} bude dál dlužit ${nameOf(group, pay.to)}, jen v jiné skupině: tady dluh zmizí a tam se připočte.`;
     if (!(await ask(msg, { ok: 'Převést' }))) return;
     const pair = debtMove(group, target, pay, f, t);
+    announce(group, `dluh ${amount} (${nameOf(group, pay.from)} → ${nameOf(group, pay.to)}) převeden do skupiny „${target.name}“`);
+    announce(target, `dluh ${amount} (${f.name} → ${t.name}) převeden ze skupiny „${group.name}“`);
     setGroups((gs) => gs.map((g) => (
       g.id === group.id ? { ...g, entries: [...g.entries, pair.out] }
       : g.id === target.id ? { ...g, entries: [...g.entries, pair.in] } : g)));
@@ -1949,6 +2012,7 @@ function App({ user, recovery }) {
     const mine = { uid: user?.id };
     const taken = id && group.members.find((m) => m.id === id)?.uid;
     if (taken && taken !== user?.id) return notify('Tohoto člena si mezitím vybral někdo jiný. Vyber prosím jiného.');
+    announce(group, `nový člen ve skupině (${id ? nameOf(group, id) : newName})`);
     if (id) {
       putGroup({ ...group, mu: Date.now(), me: id,
         members: group.members.map((m) => (m.id === id ? { ...m, ...mine, avatar: m.avatar || profile.avatar, iban: m.iban || profile.iban || undefined } : m)) });

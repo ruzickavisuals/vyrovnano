@@ -1,6 +1,6 @@
 // Offline režim: nejdřív síť (ať je vždy čerstvá verze), při výpadku poslední uložená kopie.
 // Ukládají se jen soubory aplikace – nikdy data účtu ani skupin ze serveru.
-const CACHE = 'vyrovnano-v4';
+const CACHE = 'vyrovnano-v5';
 
 self.addEventListener('install', () => self.skipWaiting());
 self.addEventListener('activate', (e) =>
@@ -27,4 +27,20 @@ self.addEventListener('fetch', (e) => {
       })
       .catch(() => caches.match(request, { ignoreSearch: request.mode === 'navigate' }))
   );
+});
+
+// Notifikace: zobrazení zprávy ze serveru a otevření aplikace po klepnutí.
+self.addEventListener('push', (e) => {
+  let d = {};
+  try { d = e.data.json(); } catch {}
+  e.waitUntil(self.registration.showNotification(d.title || 'Vyrovnáno', {
+    body: d.body || '', icon: 'brand/icon-192.png', badge: 'brand/icon-192.png', tag: d.tag || undefined,
+  }));
+});
+self.addEventListener('notificationclick', (e) => {
+  e.notification.close();
+  e.waitUntil(self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((list) => {
+    for (const c of list) if ('focus' in c) return c.focus();
+    return self.clients.openWindow('./');
+  }));
 });

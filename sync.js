@@ -133,6 +133,8 @@ export const resetInvite = (gid) => rpc('reset_invite', { p_gid: gid });
 export const kickRemote = (gid, userId) => rpc('kick_member', { p_gid: gid, p_user: userId });
 export const deleteAccount = () => rpc('delete_account');
 export const isAdmin = () => rpc('is_admin');
+export const savePushSub = (endpoint, p256dh, auth) => rpc('save_push_subscription', { p_endpoint: endpoint, p_p256dh: p256dh, p_auth: auth });
+export const deletePushSub = (endpoint) => rpc('delete_push_subscription', { p_endpoint: endpoint });
 export async function groupUserIds(gid) {
   const rows = await rpc('group_user_ids', { p_gid: gid });
   return (Array.isArray(rows) ? rows : []).map(okUuid).filter(Boolean);

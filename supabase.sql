@@ -314,6 +314,56 @@ $$;
 revoke execute on function public.save_group(uuid, jsonb, integer) from public, anon;
 grant execute on function public.save_group(uuid, jsonb, integer) to authenticated;
 
+-- ===== Notifikace =====
+-- Zařízení, která si notifikace zapnula. Čte je jen serverová funkce „notify“.
+create table if not exists public.push_subscriptions (
+  endpoint text primary key,
+  user_id uuid not null references auth.users (id) on delete cascade,
+  p256dh text not null,
+  auth text not null,
+  created_at timestamptz not null default now()
+);
+create index if not exists push_subscriptions_user on public.push_subscriptions (user_id);
+alter table public.push_subscriptions enable row level security;
+revoke all on public.push_subscriptions from anon, authenticated;
+
+-- Klíče, které si serverová funkce sama vygeneruje. Nikdo jiný k nim nesmí.
+create table if not exists public.app_secrets (
+  name text primary key,
+  value jsonb not null
+);
+alter table public.app_secrets enable row level security;
+revoke all on public.app_secrets from anon, authenticated;
+
+create or replace function public.save_push_subscription(p_endpoint text, p_p256dh text, p_auth text)
+returns void
+language plpgsql security definer set search_path = ''
+as $$
+declare me uuid := auth.uid();
+begin
+  if me is null then raise exception 'not signed in'; end if;
+  if p_endpoint !~ '^https://' or length(p_endpoint) > 1000 or length(p_p256dh) > 200 or length(p_auth) > 100 then
+    raise exception 'invalid subscription';
+  end if;
+  if (select count(*) from public.push_subscriptions s where s.user_id = me) >= 20 then
+    delete from public.push_subscriptions s where s.user_id = me
+      and s.endpoint = (select x.endpoint from public.push_subscriptions x where x.user_id = me order by x.created_at limit 1);
+  end if;
+  insert into public.push_subscriptions (endpoint, user_id, p256dh, auth) values (p_endpoint, me, p_p256dh, p_auth)
+    on conflict (endpoint) do update set user_id = me, p256dh = excluded.p256dh, auth = excluded.auth;
+end;
+$$;
+
+create or replace function public.delete_push_subscription(p_endpoint text)
+returns void
+language sql security definer set search_path = ''
+as $$
+  delete from public.push_subscriptions s where s.endpoint = p_endpoint and s.user_id = auth.uid();
+$$;
+
+revoke execute on function public.save_push_subscription(text, text, text), public.delete_push_subscription(text) from public, anon;
+grant execute on function public.save_push_subscription(text, text, text), public.delete_push_subscription(text) to authenticated;
+
 -- ===== Zálohy =====
 -- Každou hodinu se uloží kopie každé skupiny, která se od poslední zálohy změnila.
 -- Uchovává se posledních 48 verzí na skupinu; starší se mažou.
