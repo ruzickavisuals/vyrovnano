@@ -1,0 +1,1074 @@
+import { html, render, useState, useEffect, useMemo, useRef } from 'https://unpkg.com/htm@3.1.1/preact/standalone.module.js';
+import {
+  CATS, cat, CURRENCIES, uid, today, fmt, parseAmount, allocate, baseAmount, shares,
+  balances, settle, stats, toIban, spayd, dateLabel, seed,
+} from './logic.js';
+import {
+  syncEnabled, shared, canon, merge, sanitize, sig, listRemote, joinRemote, leaveRemote,
+  resetInvite, kickRemote, deleteAccount, groupUserIds, syncGroup,
+} from './sync.js';
+import {
+  getSession, onAuthChange, signUp, signIn, signInWithGoogle, sendPasswordReset,
+  updatePassword, signOut, consumeUrl,
+} from './auth.js';
+import { GOOGLE_LOGIN } from './config.js';
+
+const KEY = 'vyrovnano.v1';
+const JKEY = 'vyrovnano.join';
+function load(key, demo) {
+  try {
+    const d = JSON.parse(localStorage.getItem(key));
+    if (Array.isArray(d)) return d;
+  } catch {}
+  return demo ? [seed()] : [];
+}
+
+const PKEY = 'vyrovnano.profile';
+function loadProfile(key) {
+  try {
+    const p = JSON.parse(localStorage.getItem(key));
+    if (p && typeof p === 'object') return { name: String(p.name || ''), avatar: p.avatar };
+  } catch {}
+  return { name: '' };
+}
+
+const EMOJIS = ['👥', '🏠', '🏔️', '🏖️', '✈️', '🍻', '🎿', '🚗', '🎁', '⚽', '🎪', '💼'];
+const nameOf = (g, id) => g.members.find((m) => m.id === id)?.name || '?';
+
+/* ---------- Drobné stavební prvky ---------- */
+
+function Sheet({ title, onClose, children }) {
+  return html`
+    <div class="overlay" onClick=${(e) => e.target === e.currentTarget && onClose()}>
+      <div class="sheet" role="dialog" aria-label=${title}>
+        <div class="sheet-head">
+          <h2>${title}</h2>
+          <button class="icon-btn" onClick=${onClose} aria-label="Zavřít">✕</button>
+        </div>
+        <div class="sheet-body">${children}</div>
+      </div>
+    </div>
+  `;
+}
+
+function Seg({ options, value, onChange }) {
+  return html`
+    <div class="seg">
+      ${options.map(([v, label]) => html`
+        <button type="button" class=${v === value ? 'on' : ''} onClick=${() => onChange(v)}>${label}</button>
+      `)}
+    </div>
+  `;
+}
+
+function Balance({ cents, currency, zero = 'vyrovnáno' }) {
+  if (!cents) return html`<span class="muted">${zero}</span>`;
+  return html`<span class=${cents > 0 ? 'pos' : 'neg'}>${cents > 0 ? '+' : '−'}${fmt(Math.abs(cents), currency)}</span>`;
+}
+
+function Avatar({ m, size = 32 }) {
+  const style = `width:${size}px;height:${size}px;font-size:${Math.round(size * 0.42)}px`;
+  if (m?.avatar) return html`<img class="ava" style=${style} src=${m.avatar} alt="" />`;
+  const hue = ([...(m?.id || 'x')].reduce((a, c) => a + c.charCodeAt(0), 0) * 37) % 360;
+  const letter = [...(m?.name || '?').trim()][0] || '?';
+  return html`<span class="ava" style=${`${style};background:hsl(${hue} 50% 42%)`}>${letter.toUpperCase()}</span>`;
+}
+
+// Vybere fotku, ořízne ji na čtverec a zmenší na 128 px. Překreslením se zároveň
+// zahodí metadata fotky (poloha, čas, typ telefonu), takže se s nikým nesdílí.
+function pickImage() {
+  return new Promise((resolve) => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*';
+    input.onchange = async () => {
+      try {
+        const bmp = await createImageBitmap(input.files[0], { imageOrientation: 'from-image' });
+        const side = Math.min(bmp.width, bmp.height);
+        const c = document.createElement('canvas');
+        c.width = c.height = 128;
+        c.getContext('2d').drawImage(bmp, (bmp.width - side) / 2, (bmp.height - side) / 2, side, side, 0, 0, 128, 128);
+        resolve(c.toDataURL('image/jpeg', 0.8));
+      } catch {
+        resolve(null);
+      }
+    };
+    input.click();
+  });
+}
+
+/* ---------- Domovská obrazovka ---------- */
+
+function Home({ groups, profile, onOpen, onNew, onProfile }) {
+  return html`
+    <header class="top row">
+      <div class="grow">
+        <h1>Vyrovnáno</h1>
+        <p class="muted">Společné výdaje bez počítání</p>
+      </div>
+      <button class="ava-btn" onClick=${onProfile} aria-label="Můj profil">
+        <${Avatar} m=${{ id: 'me', name: profile.name || '🙂', avatar: profile.avatar }} size=${44} />
+      </button>
+    </header>
+    <main>
+      ${groups.length === 0 && html`
+        <div class="empty">
+          <div class="big">🧾</div>
+          <p>Zatím tu není žádná skupina.</p>
+        </div>
+      `}
+      ${groups.map((g) => {
+        const my = balances(g)[g.me] || 0;
+        const { total } = stats(g);
+        return html`
+          <button class="card group-card" onClick=${() => onOpen(g.id)}>
+            <span class="avatar">${g.emoji}</span>
+            <span class="grow">
+              <strong>${g.name}</strong>
+              <small class="muted">${g.members.length} lidí · utraceno ${fmt(total, g.currency)}${g.members.filter((m) => m.uid).length > 1 ? ' · sdílená' : ''}</small>
+            </span>
+            <span class="right">
+              <small class="muted">${my > 0 ? 'dostaneš' : my < 0 ? 'dlužíš' : ''}</small>
+              <${Balance} cents=${my} currency=${g.currency} />
+            </span>
+          </button>
+        `;
+      })}
+      <button class="btn primary wide" onClick=${onNew}>+ Nová skupina</button>
+    </main>
+  `;
+}
+
+/* ---------- Detail skupiny ---------- */
+
+function GroupView({ group, onBack, onEdit, onShare, onEntry, onAdd, onPay, onQr }) {
+  const [tab, setTab] = useState('entries');
+  const bal = useMemo(() => balances(group), [group]);
+  const st = useMemo(() => stats(group), [group]);
+  const my = bal[group.me] || 0;
+  const cur = group.currency;
+
+  return html`
+    <header class="top group-top">
+      <div class="row">
+        <button class="icon-btn" onClick=${onBack} aria-label="Zpět">‹</button>
+        <h1 class="grow">${group.emoji} ${group.name}</h1>
+        <button class="icon-btn" onClick=${onShare} aria-label="Sdílet skupinu">🔗</button>
+        <button class="icon-btn" onClick=${onEdit} aria-label="Upravit skupinu">⚙︎</button>
+      </div>
+      <div class="hero">
+        <div>
+          <small>Celkem utraceno</small>
+          <strong>${fmt(st.total, cur)}</strong>
+        </div>
+        <div class="right">
+          <small>${my > 0 ? 'Dostaneš zpět' : my < 0 ? 'Dlužíš' : 'Tvůj stav'}</small>
+          <strong class=${my > 0 ? 'pos' : my < 0 ? 'neg' : ''}>${my ? fmt(Math.abs(my), cur) : 'Vyrovnáno ✓'}</strong>
+        </div>
+      </div>
+      <${Seg} value=${tab} onChange=${setTab} options=${[['entries', 'Výdaje'], ['debts', 'Dluhy'], ['stats', 'Přehled']]} />
+    </header>
+    <main class="with-fab">
+      ${tab === 'entries' && html`<${Entries} group=${group} onEntry=${onEntry} />`}
+      ${tab === 'debts' && html`<${Debts} group=${group} bal=${bal} onPay=${onPay} onQr=${onQr} />`}
+      ${tab === 'stats' && html`<${Stats} group=${group} st=${st} />`}
+    </main>
+    <button class="fab" onClick=${onAdd} aria-label="Přidat výdaj">+</button>
+  `;
+}
+
+function Entries({ group, onEntry }) {
+  const cur = group.currency;
+  if (!group.entries.length) {
+    return html`<div class="empty"><div class="big">💸</div><p>Zatím žádné výdaje.<br />Přidej první tlačítkem +.</p></div>`;
+  }
+  const sorted = [...group.entries].reverse().sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
+  const days = [];
+  for (const e of sorted) {
+    if (!days.length || days[days.length - 1].date !== e.date) days.push({ date: e.date, items: [] });
+    days[days.length - 1].items.push(e);
+  }
+  return days.map((d) => html`
+    <h3 class="day">${dateLabel(d.date)}</h3>
+    <div class="card list">
+      ${d.items.map((e) => {
+        const base = baseAmount(e);
+        if (e.kind === 'transfer') {
+          const to = Object.keys(e.parts)[0];
+          return html`
+            <button class="item" onClick=${() => onEntry(e)}>
+              <span class="avatar sm">💱</span>
+              <span class="grow">
+                <strong>${nameOf(group, e.paidBy)} → ${nameOf(group, to)}</strong>
+                <small class="muted">vyrovnání dluhu</small>
+              </span>
+              <span class="right"><strong>${fmt(e.amount, e.currency)}</strong></span>
+            </button>
+          `;
+        }
+        const mine = (e.paidBy === group.me ? base : 0) - (shares(e)[group.me] || 0);
+        return html`
+          <button class="item" onClick=${() => onEntry(e)}>
+            <span class="avatar sm">${cat(e.category).e}</span>
+            <span class="grow">
+              <strong>${e.title}</strong>
+              <small class="muted">platil(a) ${nameOf(group, e.paidBy)}${e.currency !== cur ? ` · ${fmt(e.amount, e.currency)}` : ''}</small>
+            </span>
+            <span class="right">
+              <strong>${fmt(base, cur)}</strong>
+              <small><${Balance} cents=${mine} currency=${cur} zero="netýká se tě" /></small>
+            </span>
+          </button>
+        `;
+      })}
+    </div>
+  `);
+}
+
+function Debts({ group, bal, onPay, onQr }) {
+  const cur = group.currency;
+  const plan = settle(bal);
+  const max = Math.max(1, ...Object.values(bal).map(Math.abs));
+  return html`
+    <h3 class="day">Jak se vyrovnat</h3>
+    ${plan.length === 0
+      ? html`<div class="card pad center">🎉 Všichni jsou vyrovnaní.</div>`
+      : html`
+        <div class="card list">
+          ${plan.map((p) => {
+            const iban = toIban(group.members.find((m) => m.id === p.to)?.iban);
+            return html`
+              <div class="item static">
+                <span class="grow">
+                  <strong>${nameOf(group, p.from)} → ${nameOf(group, p.to)}</strong>
+                  <small class="neg">${fmt(p.amount, cur)}</small>
+                </span>
+                ${iban && html`<button class="btn small" onClick=${() => onQr({ ...p, iban })}>QR platba</button>`}
+                <button class="btn small primary" onClick=${() => onPay(p)}>Zaplaceno</button>
+              </div>
+            `;
+          })}
+        </div>
+        <p class="hint">Nejmenší možný počet plateb: ${plan.length}. „Zaplaceno“ zapíše převod a dluh zmizí.</p>
+      `}
+    <h3 class="day">Zůstatky</h3>
+    <div class="card pad">
+      ${group.members.map((m) => {
+        const v = bal[m.id] || 0;
+        return html`
+          <div class="bal-row">
+            <${Avatar} m=${m} size=${26} />
+            <span class="bal-name">${m.name}${m.id === group.me ? html` <em class="tag">ty</em>` : ''}</span>
+            <span class="bal-bar">
+              ${v !== 0 && html`<i class=${v > 0 ? 'p' : 'n'} style=${`width:${(Math.abs(v) / max) * 50}%`}></i>`}
+            </span>
+            <span class="bal-val"><${Balance} cents=${v} currency=${cur} zero="0" /></span>
+          </div>
+        `;
+      })}
+    </div>
+  `;
+}
+
+function Stats({ group, st }) {
+  const cur = group.currency;
+  if (!st.total) return html`<div class="empty"><div class="big">📊</div><p>Přehled se objeví po prvním výdaji.</p></div>`;
+  const cats = Object.entries(st.byCat).sort((a, b) => b[1] - a[1]);
+  const maxP = Math.max(1, ...group.members.map((m) => Math.max(st.consumed[m.id] || 0, st.paid[m.id] || 0)));
+  return html`
+    <h3 class="day">Za co se utrácelo</h3>
+    <div class="card pad">
+      ${cats.map(([id, v]) => html`
+        <div class="stat-row">
+          <div class="row"><span class="grow">${cat(id).e} ${cat(id).n}</span><strong>${fmt(v, cur)}</strong><small class="muted pct">${Math.round((v / st.total) * 100)} %</small></div>
+          <div class="track"><i style=${`width:${(v / st.total) * 100}%`}></i></div>
+        </div>
+      `)}
+    </div>
+    <h3 class="day">Kdo kolik</h3>
+    <div class="card pad">
+      ${group.members.map((m) => html`
+        <div class="stat-row">
+          <div class="row"><${Avatar} m=${m} size=${26} /><strong class="grow">${m.name}</strong></div>
+          <div class="row sub"><span class="lbl">zaplatil(a)</span><div class="track grow"><i class="alt" style=${`width:${((st.paid[m.id] || 0) / maxP) * 100}%`}></i></div><span class="num">${fmt(st.paid[m.id] || 0, cur)}</span></div>
+          <div class="row sub"><span class="lbl">podíl na útratě</span><div class="track grow"><i style=${`width:${((st.consumed[m.id] || 0) / maxP) * 100}%`}></i></div><span class="num">${fmt(st.consumed[m.id] || 0, cur)}</span></div>
+        </div>
+      `)}
+    </div>
+  `;
+}
+
+/* ---------- Formulář výdaje / převodu ---------- */
+
+function EntryForm({ group, entry, onSave, onDelete }) {
+  const members = group.members;
+  const init = entry || {
+    kind: 'expense', title: '', amount: 0, currency: group.currency, rate: 1,
+    paidBy: group.me, mode: 'equal', category: 'food', date: today(),
+    parts: Object.fromEntries(members.map((m) => [m.id, 1])),
+  };
+  const [kind, setKind] = useState(init.kind);
+  const [title, setTitle] = useState(init.title);
+  const [amountStr, setAmountStr] = useState(init.amount ? String(init.amount / 100).replace('.', ',') : '');
+  const [currency, setCurrency] = useState(init.currency);
+  const [rateStr, setRateStr] = useState(String(init.rate).replace('.', ','));
+  const [rateNote, setRateNote] = useState('');
+  const [paidBy, setPaidBy] = useState(init.paidBy);
+  const [category, setCategory] = useState(init.category);
+  const [date, setDate] = useState(init.date);
+  const [mode, setMode] = useState(init.mode);
+  const [parts, setParts] = useState(() =>
+    Object.fromEntries(members.map((m) => {
+      const v = init.kind === 'expense' ? init.parts[m.id] || 0 : 1;
+      return [m.id, init.mode === 'exact' ? (v ? String(v / 100).replace('.', ',') : '') : v];
+    })));
+  const [to, setTo] = useState(
+    init.kind === 'transfer' ? Object.keys(init.parts)[0] : members.find((m) => m.id !== init.paidBy)?.id);
+
+  const amount = parseAmount(amountStr);
+  const rate = currency === group.currency ? 1 : parseFloat(rateStr.replace(',', '.')) || 0;
+  const foreign = currency !== group.currency;
+
+  async function pickCurrency(c) {
+    setCurrency(c);
+    if (c === group.currency) return;
+    setRateNote('Načítám aktuální kurz…');
+    try {
+      const r = await fetch(`https://api.frankfurter.dev/v1/latest?base=${c}&symbols=${group.currency}`);
+      const j = await r.json();
+      const v = j.rates[group.currency];
+      setRateStr(String(v).replace('.', ','));
+      setRateNote(`Kurz ECB z ${j.date}, můžeš ho přepsat.`);
+    } catch {
+      setRateNote('Kurz se nepodařilo načíst, zadej ho ručně.');
+    }
+  }
+
+  function changeMode(m) {
+    setMode(m);
+    setParts(Object.fromEntries(members.map((x) => [x.id, m === 'exact' ? '' : 1])));
+  }
+  const setPart = (id, v) => setParts((p) => ({ ...p, [id]: v }));
+
+  const weights = Object.fromEntries(
+    members.map((m) => [m.id, mode === 'exact' ? parseAmount(parts[m.id]) : Number(parts[m.id]) || 0]));
+  const preview = allocate(amount, weights);
+  const exactSum = Object.values(weights).reduce((a, b) => a + b, 0);
+  const exactLeft = amount - exactSum;
+
+  let error = '';
+  if (!amount) error = 'Zadej částku';
+  else if (foreign && !rate) error = 'Zadej kurz';
+  else if (kind === 'transfer') { if (!to || to === paidBy) error = 'Vyber dva různé lidi'; }
+  else if (!exactSum) error = 'Vyber, mezi koho se dělí';
+  else if (mode === 'exact' && exactLeft) error = exactLeft > 0 ? `Zbývá rozdělit ${fmt(exactLeft, currency)}` : `Rozděleno o ${fmt(-exactLeft, currency)} víc`;
+
+  function submit(ev) {
+    ev.preventDefault();
+    if (error) return;
+    const common = { id: entry?.id || uid(), amount, currency, rate, paidBy, date };
+    if (kind === 'transfer') {
+      onSave({ ...common, kind, title: 'Převod', mode: 'equal', category: 'other', parts: { [to]: 1 } });
+    } else {
+      const clean = Object.fromEntries(Object.entries(weights).filter(([, v]) => v > 0));
+      onSave({ ...common, kind, title: title.trim() || cat(category).n, mode, category, parts: clean });
+    }
+  }
+
+  return html`
+    <form onSubmit=${submit} class="form">
+      ${!entry && html`<${Seg} value=${kind} onChange=${setKind} options=${[['expense', 'Výdaj'], ['transfer', 'Převod peněz']]} />`}
+
+      <div class="amount-row">
+        <input class="amount" inputmode="decimal" placeholder="0" value=${amountStr} onInput=${(e) => setAmountStr(e.target.value)} aria-label="Částka" />
+        <select value=${currency} onChange=${(e) => pickCurrency(e.target.value)} aria-label="Měna">
+          ${[...new Set([group.currency, ...CURRENCIES])].map((c) => html`<option value=${c}>${c}</option>`)}
+        </select>
+      </div>
+      ${foreign && html`
+        <label class="field">
+          <span>Kurz: 1 ${currency} = ? ${group.currency}</span>
+          <input inputmode="decimal" value=${rateStr} onInput=${(e) => setRateStr(e.target.value)} />
+          <small class="muted">${rateNote}${amount && rate ? ` Celkem ${fmt(Math.round(amount * rate), group.currency)}.` : ''}</small>
+        </label>
+      `}
+
+      ${kind === 'expense' && html`
+        <label class="field">
+          <span>Za co</span>
+          <input placeholder="např. Večeře" value=${title} onInput=${(e) => setTitle(e.target.value)} />
+        </label>
+        <div class="chips">
+          ${CATS.map((c) => html`
+            <button type="button" class=${'chip' + (c.id === category ? ' on' : '')} onClick=${() => setCategory(c.id)}>${c.e} ${c.n}</button>
+          `)}
+        </div>
+      `}
+
+      <div class="two">
+        <label class="field">
+          <span>${kind === 'transfer' ? 'Kdo platí' : 'Kdo platil'}</span>
+          <select value=${paidBy} onChange=${(e) => setPaidBy(e.target.value)}>
+            ${members.map((m) => html`<option value=${m.id}>${m.name}</option>`)}
+          </select>
+        </label>
+        ${kind === 'transfer'
+          ? html`
+            <label class="field">
+              <span>Komu</span>
+              <select value=${to} onChange=${(e) => setTo(e.target.value)}>
+                ${members.map((m) => html`<option value=${m.id}>${m.name}</option>`)}
+              </select>
+            </label>`
+          : html`
+            <label class="field">
+              <span>Kdy</span>
+              <input type="date" value=${date} onInput=${(e) => setDate(e.target.value)} />
+            </label>`}
+      </div>
+
+      ${kind === 'expense' && html`
+        <div class="field">
+          <span>Jak rozdělit</span>
+          <${Seg} value=${mode} onChange=${changeMode} options=${[['equal', 'Rovným dílem'], ['shares', 'Podíly'], ['exact', 'Přesné částky']]} />
+        </div>
+        <div class="card list split">
+          ${members.map((m) => html`
+            <div class="item static">
+              ${mode === 'equal' && html`
+                <label class="check grow">
+                  <input type="checkbox" checked=${!!parts[m.id]} onChange=${(e) => setPart(m.id, e.target.checked ? 1 : 0)} />
+                  <span>${m.name}</span>
+                </label>`}
+              ${mode === 'shares' && html`
+                <span class="grow">${m.name}</span>
+                <span class="stepper">
+                  <button type="button" onClick=${() => setPart(m.id, Math.max(0, (Number(parts[m.id]) || 0) - 1))}>−</button>
+                  <b>${Number(parts[m.id]) || 0}×</b>
+                  <button type="button" onClick=${() => setPart(m.id, (Number(parts[m.id]) || 0) + 1)}>+</button>
+                </span>`}
+              ${mode === 'exact' && html`
+                <span class="grow">${m.name}</span>
+                <input class="mini" inputmode="decimal" placeholder="0" value=${parts[m.id]} onInput=${(e) => setPart(m.id, e.target.value)} />`}
+              ${mode !== 'exact' && html`<span class="share muted">${preview[m.id] ? fmt(preview[m.id], currency) : '—'}</span>`}
+            </div>
+          `)}
+        </div>
+      `}
+
+      <button class="btn primary wide" disabled=${!!error}>${error || (entry ? 'Uložit změny' : 'Přidat')}</button>
+      ${entry && html`<button type="button" class="btn danger wide" onClick=${onDelete}>Smazat</button>`}
+    </form>
+  `;
+}
+
+/* ---------- Formulář skupiny ---------- */
+
+function GroupForm({ group, profile, deleteLabel, onSave, onDelete }) {
+  const [name, setName] = useState(group?.name || '');
+  const [emoji, setEmoji] = useState(group?.emoji || '👥');
+  const [currency, setCurrency] = useState(group?.currency || 'CZK');
+  const [members, setMembers] = useState(group?.members || [{ id: uid(), name: profile.name || 'Já', avatar: profile.avatar }, { id: uid(), name: '' }]);
+  const [me, setMe] = useState(group?.me || members[0].id);
+  const used = new Set((group?.entries || []).flatMap((e) => [e.paidBy, ...Object.keys(e.parts)]));
+  const upd = (id, patch) => setMembers((ms) => ms.map((m) => (m.id === id ? { ...m, ...patch } : m)));
+
+  const valid = members.filter((m) => m.name.trim());
+  const error = !name.trim() ? 'Zadej název skupiny' : valid.length < 2 ? 'Přidej aspoň dva lidi' : '';
+
+  function submit(ev) {
+    ev.preventDefault();
+    if (error) return;
+    const ms = members.filter((m) => m.name.trim() || used.has(m.id)).map((m) => ({ ...m, name: m.name.trim() || '?', iban: (m.iban || '').trim() }));
+    onSave({
+      ...(group || {}), id: group?.id || uid(), entries: group?.entries || [],
+      name: name.trim(), emoji, currency, members: ms, me: ms.some((m) => m.id === me) ? me : ms[0].id,
+    });
+  }
+
+  return html`
+    <form onSubmit=${submit} class="form">
+      <label class="field">
+        <span>Název</span>
+        <input placeholder="např. Dovolená Chorvatsko" value=${name} onInput=${(e) => setName(e.target.value)} />
+      </label>
+      <div class="chips">
+        ${EMOJIS.map((e) => html`<button type="button" class=${'chip emoji' + (e === emoji ? ' on' : '')} onClick=${() => setEmoji(e)}>${e}</button>`)}
+      </div>
+      <label class="field">
+        <span>Měna skupiny</span>
+        <select value=${currency} disabled=${!!group?.entries.length} onChange=${(e) => setCurrency(e.target.value)}>
+          ${CURRENCIES.map((c) => html`<option value=${c}>${c}</option>`)}
+        </select>
+        ${group?.entries.length ? html`<small class="muted">Měnu nejde změnit, skupina už má výdaje.</small>` : ''}
+      </label>
+
+      <div class="field"><span>Členové</span></div>
+      <div class="card list">
+        ${members.map((m) => html`
+          <div class="member">
+            <div class="row">
+              <button type="button" class="ava-btn" aria-label="Změnit fotku"
+                onClick=${async () => { const a = await pickImage(); if (a) upd(m.id, { avatar: a }); }}>
+                <${Avatar} m=${m} size=${36} />
+              </button>
+              <input class="grow" placeholder="Jméno" maxlength="60" value=${m.name} onInput=${(e) => upd(m.id, { name: e.target.value })} />
+              <label class="me-pick"><input type="radio" name="me" checked=${me === m.id} onChange=${() => setMe(m.id)} /> já</label>
+              <button type="button" class="icon-btn" disabled=${used.has(m.id) || members.length <= 2}
+                title=${used.has(m.id) ? 'Má výdaje, nejde odebrat' : 'Odebrat'}
+                onClick=${() => setMembers((ms) => ms.filter((x) => x.id !== m.id))}>✕</button>
+            </div>
+            <input class="iban" placeholder="Číslo účtu pro QR platbu (nepovinné)" value=${m.iban || ''} onInput=${(e) => upd(m.id, { iban: e.target.value })} />
+            ${m.iban && !toIban(m.iban) ? html`<small class="neg">Zadej ve tvaru 123456789/0800 nebo IBAN.</small>` : ''}
+          </div>
+        `)}
+      </div>
+      <button type="button" class="btn wide" onClick=${() => setMembers((ms) => [...ms, { id: uid(), name: '' }])}>+ Přidat člena</button>
+
+      <button class="btn primary wide" disabled=${!!error}>${error || (group ? 'Uložit' : 'Vytvořit skupinu')}</button>
+      ${group && html`<button type="button" class="btn danger wide" onClick=${onDelete}>${deleteLabel}</button>`}
+    </form>
+  `;
+}
+
+/* ---------- QR kódy ---------- */
+
+async function makeQr(text) {
+  const mod = await import('https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/+esm');
+  const q = mod.default(0, 'M');
+  q.addData(text);
+  q.make();
+  return q.createDataURL(8, 16);
+}
+
+function Qr({ text, alt }) {
+  const [src, setSrc] = useState('');
+  const [err, setErr] = useState(false);
+  useEffect(() => {
+    makeQr(text).then(setSrc).catch(() => setErr(true));
+  }, [text]);
+  return src
+    ? html`<img src=${src} alt=${alt} />`
+    : html`<p class="muted">${err ? 'QR kód se nepodařilo vytvořit (jsi offline?).' : 'Vytvářím QR kód…'}</p>`;
+}
+
+function QrSheet({ group, pay }) {
+  return html`
+    <div class="qr">
+      <p><strong>${nameOf(group, pay.from)}</strong> platí <strong>${nameOf(group, pay.to)}</strong></p>
+      <div class="qr-amount">${fmt(pay.amount, group.currency)}</div>
+      <${Qr} alt="QR platba" text=${spayd(pay.iban, pay.amount, group.currency, `${group.name} - ${nameOf(group, pay.from)}`)} />
+      <p class="hint">Naskenuj v bankovní aplikaci. Účet: ${pay.iban}</p>
+    </div>
+  `;
+}
+
+/* ---------- Sdílení ---------- */
+
+function ShareSheet({ group, user, syncState, onReset, onKick }) {
+  const [copied, setCopied] = useState(false);
+  const [ids, setIds] = useState(null);
+  useEffect(() => {
+    if (user && group.remote) groupUserIds(group.id).then(setIds).catch(() => setIds([]));
+  }, [group.invite, group.remote]);
+
+  if (!user) {
+    return html`<div class="form"><p>Sdílení zatím není zapnuté: aplikace ještě není propojená s databází.</p>
+      <p class="hint">Do té doby zůstávají všechna data jen v tomto zařízení.</p></div>`;
+  }
+  if (!group.invite) {
+    return html`<div class="form"><p>Skupina se ještě neuložila na server. ${
+      syncState === 'err' ? 'Teď se nedaří připojit, zkus to za chvíli.' : 'Chvilku strpení…'}</p></div>`;
+  }
+  const link = `${location.origin}${location.pathname}#join=${group.invite}`;
+  return html`
+    <div class="form">
+      <p>Skupinu vidí jen lidé, které pozveš. Pošli jim odkaz nebo ukaž QR kód. Po otevření se přihlásí svým účtem a skupina se jim přidá.</p>
+      <div class="qr"><${Qr} text=${link} alt="QR kód pozvánky" /></div>
+      <input readonly value=${link} onFocus=${(e) => e.target.select()} aria-label="Odkaz pozvánky" />
+      <button class="btn primary wide" onClick=${async () => {
+        try { await navigator.clipboard.writeText(link); setCopied(true); } catch {}
+      }}>${copied ? 'Zkopírováno ✓' : 'Zkopírovat odkaz'}</button>
+      ${navigator.share && html`<button class="btn wide" onClick=${() => navigator.share({ title: group.name, url: link }).catch(() => {})}>Sdílet…</button>`}
+
+      <div class="field"><span>Kdo má přístup</span></div>
+      <div class="card list">
+        ${ids === null
+          ? html`<div class="item static muted">Načítám…</div>`
+          : ids.map((id) => {
+              const m = group.members.find((x) => x.uid === id);
+              return html`
+                <div class="item static">
+                  <${Avatar} m=${m || { id, name: '?' }} size=${32} />
+                  <span class="grow">${m ? m.name : 'Nový člen (ještě si nevybral, kdo je)'}${id === user.id ? html` <em class="tag">ty</em>` : ''}</span>
+                  ${group.owner && id !== user.id && html`<button class="btn small danger" onClick=${() => onKick(id, m?.name)}>Odebrat</button>`}
+                </div>
+              `;
+            })}
+      </div>
+      ${group.owner && html`
+        <button class="btn wide" onClick=${onReset}>Zrušit odkaz a vytvořit nový</button>
+        <p class="hint">Starý odkaz přestane fungovat. Lidem, kteří už ve skupině jsou, přístup zůstane.</p>
+      `}
+    </div>
+  `;
+}
+
+function WhoSheet({ group, profile, onPick }) {
+  const [name, setName] = useState(profile.name);
+  const free = group.members.filter((m) => !m.uid);
+  return html`
+    <div class="form">
+      <p>Vyber, kdo ze skupiny jsi, ať ti aplikace ukazuje tvoje dluhy.</p>
+      ${free.length > 0 && html`
+        <div class="card list">
+          ${free.map((m) => html`
+            <button class="item" onClick=${() => onPick(m.id)}>
+              <${Avatar} m=${m} size=${34} /><strong class="grow">${m.name}</strong>
+            </button>
+          `)}
+        </div>`}
+      <label class="field">
+        <span>Nejsem v seznamu</span>
+        <input value=${name} maxlength="60" placeholder="Tvoje jméno" onInput=${(e) => setName(e.target.value)} />
+      </label>
+      <button class="btn wide" disabled=${!name.trim()} onClick=${() => onPick(null, name.trim())}>Přidat mě do skupiny</button>
+    </div>
+  `;
+}
+
+/* ---------- Účet a profil ---------- */
+
+function PasswordForm({ label = 'Změnit heslo', onDone }) {
+  const [pw, setPw] = useState('');
+  const [msg, setMsg] = useState('');
+  const [busy, setBusy] = useState(false);
+  async function submit(ev) {
+    ev.preventDefault();
+    setBusy(true);
+    setMsg('');
+    try {
+      await updatePassword(pw);
+      setPw('');
+      setMsg('Heslo je změněné ✓');
+      onDone && onDone();
+    } catch (e) {
+      setMsg(e.message);
+    }
+    setBusy(false);
+  }
+  return html`
+    <form class="form" onSubmit=${submit}>
+      <label class="field">
+        <span>Nové heslo (aspoň 8 znaků)</span>
+        <input type="password" autocomplete="new-password" minlength="8" maxlength="72" required value=${pw} onInput=${(e) => setPw(e.target.value)} />
+      </label>
+      <button class="btn wide" disabled=${busy || pw.length < 8}>${busy ? 'Ukládám…' : label}</button>
+      ${msg && html`<p class="hint" role="status">${msg}</p>`}
+    </form>
+  `;
+}
+
+function ProfileSheet({ profile, user, onSave, onLogout, onDeleteAccount }) {
+  const [name, setName] = useState(profile.name);
+  const [avatar, setAvatar] = useState(profile.avatar);
+  return html`
+    <div class="form">
+      <div class="profile-pic">
+        <${Avatar} m=${{ id: 'me', name: name || '🙂', avatar }} size=${96} />
+        <div class="row">
+          <button class="btn small" onClick=${async () => { const a = await pickImage(); if (a) setAvatar(a); }}>${avatar ? 'Změnit fotku' : 'Přidat fotku'}</button>
+          ${avatar && html`<button class="btn small danger" onClick=${() => setAvatar(undefined)}>Odebrat</button>`}
+        </div>
+      </div>
+      <label class="field">
+        <span>Jméno</span>
+        <input value=${name} maxlength="60" placeholder="Jak ti říkají" onInput=${(e) => setName(e.target.value)} />
+      </label>
+      <p class="hint">Fotku a jméno uvidí jen lidé ve tvých skupinách. Fotka se zmenší a uloží bez údajů o poloze.</p>
+      <button class="btn primary wide" onClick=${() => onSave({ name: name.trim(), avatar })}>Uložit</button>
+
+      ${user && html`
+        <hr />
+        <div class="field"><span>Účet</span><div>${user.email}${user.provider !== 'email' ? ` · přihlášení přes ${user.provider === 'google' ? 'Google' : user.provider}` : ''}</div></div>
+        ${user.provider === 'email' && html`<${PasswordForm} />`}
+        <button class="btn wide" onClick=${onLogout}>Odhlásit se</button>
+        <button class="btn danger wide" onClick=${onDeleteAccount}>Smazat účet</button>
+      `}
+    </div>
+  `;
+}
+
+function AuthScreen({ notice }) {
+  const [mode, setMode] = useState('in');
+  const [email, setEmail] = useState('');
+  const [pw, setPw] = useState('');
+  const [msg, setMsg] = useState(notice || '');
+  const [busy, setBusy] = useState(false);
+
+  async function submit(ev) {
+    ev.preventDefault();
+    setBusy(true);
+    setMsg('');
+    try {
+      const mail = email.trim().toLowerCase();
+      if (mode === 'in') await signIn(mail, pw);
+      else if (mode === 'up') {
+        if ((await signUp(mail, pw)) === 'confirm') {
+          setMsg('Hotovo. Poslali jsme ti e-mail s potvrzovacím odkazem; po kliknutí na něj se přihlásíš.');
+          setPw('');
+        }
+      } else {
+        await sendPasswordReset(mail);
+        setMsg('Pokud u nás účet s tímto e-mailem existuje, poslali jsme na něj odkaz pro nastavení nového hesla.');
+      }
+    } catch (e) {
+      setMsg(e.message);
+    }
+    setBusy(false);
+  }
+
+  return html`
+    <div class="app auth">
+      <header class="top">
+        <h1>Vyrovnáno</h1>
+        <p class="muted">Společné výdaje bez počítání</p>
+      </header>
+      <main>
+        ${mode !== 'forgot' && html`<${Seg} value=${mode} onChange=${(m) => { setMode(m); setMsg(''); }} options=${[['in', 'Přihlášení'], ['up', 'Nový účet']]} />`}
+        ${mode === 'forgot' && html`<p>Zadej e-mail svého účtu a pošleme ti odkaz pro nastavení nového hesla.</p>`}
+        <form class="form" onSubmit=${submit}>
+          <label class="field">
+            <span>E-mail</span>
+            <input type="email" autocomplete="username" required maxlength="254" value=${email} onInput=${(e) => setEmail(e.target.value)} />
+          </label>
+          ${mode !== 'forgot' && html`
+            <label class="field">
+              <span>Heslo${mode === 'up' ? ' (aspoň 8 znaků)' : ''}</span>
+              <input type="password" required minlength=${mode === 'up' ? 8 : 1} maxlength="72"
+                autocomplete=${mode === 'up' ? 'new-password' : 'current-password'} value=${pw} onInput=${(e) => setPw(e.target.value)} />
+            </label>`}
+          ${msg && html`<p class="notice" role="status">${msg}</p>`}
+          <button class="btn primary wide" disabled=${busy}>
+            ${busy ? 'Moment…' : mode === 'in' ? 'Přihlásit se' : mode === 'up' ? 'Vytvořit účet' : 'Poslat odkaz'}
+          </button>
+        </form>
+        ${mode === 'in' && html`<button class="btn link wide" onClick=${() => { setMode('forgot'); setMsg(''); }}>Zapomenuté heslo</button>`}
+        ${mode === 'forgot' && html`<button class="btn wide" onClick=${() => { setMode('in'); setMsg(''); }}>Zpět na přihlášení</button>`}
+        ${GOOGLE_LOGIN && mode !== 'forgot' && html`
+          <div class="divider">nebo</div>
+          <button class="btn wide" onClick=${signInWithGoogle}>Pokračovat přes Google</button>
+        `}
+        <p class="hint center">Tvoje skupiny vidí jen lidé, které do nich pozveš.</p>
+      </main>
+    </div>
+  `;
+}
+
+/* ---------- Aplikace ---------- */
+
+function App({ user, recovery }) {
+  const gkey = user ? `${KEY}.${user.id}` : KEY;
+  const pkey = user ? `${PKEY}.${user.id}` : PKEY;
+  const [groups, setGroups] = useState(() => load(gkey, !user));
+  const [profile, setProfile] = useState(() => loadProfile(pkey));
+  const [gid, setGid] = useState(null);
+  const [sheet, setSheet] = useState(recovery ? { type: 'newpw' } : null);
+  const [syncState, setSyncState] = useState('');
+  const ref = useRef(groups);
+  ref.current = groups;
+  const busy = useRef({});
+  const synced = useRef({});
+  const leaving = useRef(false);
+
+  useEffect(() => { if (!leaving.current) localStorage.setItem(gkey, JSON.stringify(groups)); }, [groups]);
+  useEffect(() => { if (!leaving.current) localStorage.setItem(pkey, JSON.stringify(profile)); }, [profile]);
+
+  const group = groups.find((g) => g.id === gid);
+  const close = () => setSheet(null);
+  // S účtem se „kdo jsem já“ neukládá do zařízení, ale pozná se podle účtu propojeného se členem.
+  const withMe = (g) => (user ? { ...g, me: g.members.find((m) => m.uid === user.id)?.id ?? null } : g);
+  const prof = { ...profile, name: profile.name || (user ? user.email.split('@')[0] : '') };
+
+  /* --- synchronizace --- */
+  async function sync(id) {
+    const g = ref.current.find((x) => x.id === id);
+    if (!user || !g || busy.current[id]) return;
+    busy.current[id] = true;
+    try {
+      const res = await syncGroup(g);
+      if (res.gone) {
+        // Přístup mi byl odebrán nebo skupina zanikla: zmizí i z tohoto zařízení.
+        delete synced.current[id];
+        setGroups((gs) => gs.filter((x) => x.id !== id));
+        setGid((cur) => (cur === id ? null : cur));
+      } else {
+        synced.current[id] = canon(res.data);
+        // Sloučíme znovu s aktuálním stavem, kdyby uživatel mezitím něco změnil.
+        setGroups((gs) => gs.map((x) => {
+          if (x.id !== id) return x;
+          const local = sanitize(shared(x));
+          const m = merge(local, res.data);
+          const same = canon(m) === canon(local) && x.invite === res.invite && x.owner === res.owner && x.remote;
+          return same ? x : withMe({ ...x, ...m, invite: res.invite, owner: res.owner, remote: true });
+        }));
+      }
+      setSyncState('ok');
+    } catch {
+      setSyncState('err');
+    } finally {
+      busy.current[id] = false;
+    }
+  }
+  // Seznam mých skupin ze serveru (např. po přihlášení na novém zařízení).
+  async function refreshList() {
+    if (!user) return;
+    try {
+      const rows = await listRemote();
+      setGroups((gs) => {
+        const add = rows.filter((r) => !gs.some((g) => g.id === r.id));
+        return add.length
+          ? [...gs, ...add.map((r) => withMe({ id: r.id, remote: true, invite: r.invite, owner: r.owner, ...r.data }))]
+          : gs;
+      });
+      setProfile((p) => {
+        if (p.name || p.avatar) return p;
+        const mine = rows.flatMap((r) => r.data.members).find((m) => m.uid === user.id);
+        return mine ? { name: mine.name, avatar: mine.avatar } : p;
+      });
+      setSyncState('ok');
+    } catch {
+      setSyncState('err');
+    }
+  }
+  useEffect(() => {
+    if (gid === null) refreshList();
+  }, [gid]);
+  // Po každé změně odešleme skupiny, které se liší od poslední synchronizace.
+  useEffect(() => {
+    if (!user) return;
+    const t = setTimeout(() => {
+      for (const g of groups) if (sig(g) !== synced.current[g.id]) sync(g.id);
+    }, 400);
+    return () => clearTimeout(t);
+  }, [groups]);
+  // Otevřená skupina se pravidelně ptá serveru na změny od ostatních.
+  useEffect(() => {
+    if (!user) return;
+    const tick = () => {
+      if (document.visibilityState !== 'visible') return;
+      if (gid) sync(gid);
+      else refreshList();
+    };
+    const iv = setInterval(tick, gid ? 6000 : 30000);
+    document.addEventListener('visibilitychange', tick);
+    return () => { clearInterval(iv); document.removeEventListener('visibilitychange', tick); };
+  }, [gid]);
+
+  /* --- pozvánky --- */
+  async function join(token) {
+    if (!user) return alert('Sdílení zatím není zapnuté.');
+    try {
+      const row = await joinRemote(token);
+      if (!row) return alert('Pozvánka je neplatná nebo už byla zrušena.');
+      setGroups((gs) => (gs.some((g) => g.id === row.id)
+        ? gs
+        : [...gs, withMe({ id: row.id, remote: true, invite: row.invite, owner: row.owner, ...row.data })]));
+      setSheet(null);
+      setGid(row.id);
+    } catch {
+      alert('Pozvánku se nepodařilo otevřít. Jsi online?');
+    }
+  }
+  useEffect(() => {
+    const fromHash = () => {
+      const m = location.hash.match(/^#join=([a-f0-9]{32})$/);
+      if (!m) return;
+      history.replaceState(null, '', location.pathname);
+      join(m[1]);
+    };
+    let stashed = null;
+    try { stashed = sessionStorage.getItem(JKEY); sessionStorage.removeItem(JKEY); } catch {}
+    if (stashed && /^[a-f0-9]{32}$/.test(stashed)) join(stashed);
+    fromHash();
+    addEventListener('hashchange', fromHash);
+    return () => removeEventListener('hashchange', fromHash);
+  }, []);
+
+  /* --- úpravy dat --- */
+  const putGroup = (g) => {
+    setGroups((gs) => (gs.some((x) => x.id === g.id) ? gs.map((x) => (x.id === g.id ? g : x)) : [...gs, g]));
+    close();
+  };
+  function saveGroupForm(g) {
+    let out = { ...g, mu: Date.now() };
+    if (user) {
+      if (!groups.some((x) => x.id === g.id)) out.id = crypto.randomUUID();
+      out.members = out.members.map((m) => ({ ...m, uid: m.id === out.me ? user.id : m.uid === user.id ? undefined : m.uid }));
+    }
+    putGroup(out);
+  }
+  const saveEntry = (e) => {
+    const entry = { ...e, u: Date.now() };
+    const has = group.entries.some((x) => x.id === e.id);
+    putGroup({ ...group, entries: has ? group.entries.map((x) => (x.id === e.id ? entry : x)) : [...group.entries, entry] });
+  };
+  const deleteEntry = (id) =>
+    putGroup({ ...group, entries: group.entries.filter((x) => x.id !== id), dead: { ...(group.dead || {}), [id]: Date.now() } });
+
+  const needsWho = group && !group.members.some((m) => m.id === group.me);
+  function pickWho(id, newName) {
+    const mine = { uid: user?.id };
+    if (id) {
+      putGroup({ ...group, mu: Date.now(), me: id,
+        members: group.members.map((m) => (m.id === id ? { ...m, ...mine, avatar: m.avatar || profile.avatar } : m)) });
+    } else {
+      const m = { id: uid(), name: newName, avatar: profile.avatar, ...mine };
+      putGroup({ ...group, mu: Date.now(), me: m.id, members: [...group.members, m] });
+      if (!profile.name) setProfile({ ...profile, name: newName });
+    }
+  }
+  function saveProfile(p) {
+    setProfile(p);
+    setGroups((gs) => gs.map((g) => {
+      const me = g.members.find((m) => m.id === g.me);
+      if (!me) return g;
+      const name = p.name && (me.name === 'Já' || me.name === prof.name) ? p.name : me.name;
+      if (name === me.name && me.avatar === p.avatar) return g;
+      return { ...g, mu: Date.now(), members: g.members.map((m) => (m === me ? { ...m, name, avatar: p.avatar } : m)) };
+    }));
+    close();
+  }
+  async function removeGroup(g) {
+    if (user) {
+      const others = g.members.some((m) => m.uid && m.uid !== user.id);
+      const msg = others
+        ? `Opustit skupinu „${g.name}“? Ztratíš k ní přístup, ostatním členům zůstane.`
+        : `Smazat skupinu „${g.name}“ se všemi výdaji? Nikdo další k ní přístup nemá, takže zmizí úplně.`;
+      if (!confirm(msg)) return;
+      if (g.remote) {
+        try { await leaveRemote(g.id); } catch { return alert('Nepodařilo se. Zkus to znovu, až budeš online.'); }
+      }
+    } else if (!confirm(`Opravdu smazat skupinu „${g.name}“ se všemi výdaji?`)) return;
+    delete synced.current[g.id];
+    setGroups((gs) => gs.filter((x) => x.id !== g.id));
+    setGid(null);
+    close();
+  }
+  async function doReset() {
+    if (!confirm('Zrušit současný odkaz? Kdo ho má a ještě se nepřipojil, už se s ním nepřipojí.')) return;
+    try {
+      const t = await resetInvite(group.id);
+      if (/^[0-9a-f]{32}$/.test(t)) setGroups((gs) => gs.map((g) => (g.id === group.id ? { ...g, invite: t } : g)));
+    } catch {
+      alert('Nepodařilo se. Zkus to prosím znovu.');
+    }
+  }
+  async function doKick(userId, name) {
+    if (!confirm(`Odebrat přístup: ${name || 'tento účet'}? Skupinu už neuvidí a starý odkaz přestane platit. Jeho výdaje ve skupině zůstanou.`)) return;
+    try {
+      const t = await kickRemote(group.id, userId);
+      setGroups((gs) => gs.map((g) => (g.id !== group.id ? g : {
+        ...g, mu: Date.now(), invite: /^[0-9a-f]{32}$/.test(t) ? t : g.invite,
+        members: g.members.map((m) => (m.uid === userId ? { ...m, uid: undefined } : m)),
+      })));
+    } catch {
+      alert('Nepodařilo se. Zkus to prosím znovu.');
+    }
+  }
+  async function logout(skipConfirm) {
+    const dirty = groups.some((g) => sig(g) !== synced.current[g.id]);
+    if (!skipConfirm && dirty && !confirm('Některé změny se ještě neodeslaly na server a odhlášením se ztratí. Opravdu se odhlásit?')) return;
+    // Při odhlášení z tohoto zařízení mažeme i uložená data, ať je neuvidí další člověk u stejného telefonu.
+    leaving.current = true;
+    localStorage.removeItem(gkey);
+    localStorage.removeItem(pkey);
+    await signOut();
+  }
+  async function removeAccount() {
+    if (!confirm('Opravdu smazat účet? Skupiny, kde jsi jediný, zmizí. Tohle nejde vrátit.')) return;
+    try {
+      await deleteAccount();
+      await logout(true);
+    } catch {
+      alert('Účet se nepodařilo smazat. Zkus to prosím znovu.');
+    }
+  }
+
+  return html`
+    <div class="app">
+      ${group
+        ? html`<${GroupView} key=${group.id} group=${group}
+            onBack=${() => setGid(null)}
+            onEdit=${() => setSheet({ type: 'group', group })}
+            onShare=${() => setSheet({ type: 'share' })}
+            onAdd=${() => setSheet({ type: 'entry' })}
+            onEntry=${(entry) => setSheet({ type: 'entry', entry })}
+            onQr=${(pay) => setSheet({ type: 'qr', pay })}
+            onPay=${(p) => saveEntry({
+              id: uid(), kind: 'transfer', title: 'Převod', amount: p.amount, currency: group.currency, rate: 1,
+              paidBy: p.from, mode: 'equal', parts: { [p.to]: 1 }, category: 'other', date: today(),
+            })} />`
+        : html`<${Home} groups=${groups} profile=${prof} onOpen=${setGid}
+            onNew=${() => setSheet({ type: 'group' })} onProfile=${() => setSheet({ type: 'profile' })} />`}
+
+      ${sheet?.type === 'group' && html`
+        <${Sheet} title=${sheet.group ? 'Upravit skupinu' : 'Nová skupina'} onClose=${close}>
+          <${GroupForm} group=${sheet.group} profile=${prof} onSave=${saveGroupForm}
+            deleteLabel=${!user ? 'Smazat skupinu' : sheet.group?.members.some((m) => m.uid && m.uid !== user.id) ? 'Opustit skupinu' : 'Smazat skupinu'}
+            onDelete=${() => removeGroup(sheet.group)} />
+        <//>`}
+      ${sheet?.type === 'entry' && group && html`
+        <${Sheet} title=${sheet.entry ? 'Upravit záznam' : 'Nový záznam'} onClose=${close}>
+          <${EntryForm} group=${group} entry=${sheet.entry} onSave=${saveEntry} onDelete=${() => deleteEntry(sheet.entry.id)} />
+        <//>`}
+      ${sheet?.type === 'qr' && group && html`
+        <${Sheet} title="QR platba" onClose=${close}>
+          <${QrSheet} group=${group} pay=${sheet.pay} />
+        <//>`}
+      ${sheet?.type === 'share' && group && html`
+        <${Sheet} title="Sdílení skupiny" onClose=${close}>
+          <${ShareSheet} group=${group} user=${user} syncState=${syncState} onReset=${doReset} onKick=${doKick} />
+        <//>`}
+      ${sheet?.type === 'profile' && html`
+        <${Sheet} title="Můj profil" onClose=${close}>
+          <${ProfileSheet} profile=${profile} user=${user} onSave=${saveProfile} onLogout=${() => logout()} onDeleteAccount=${removeAccount} />
+        <//>`}
+      ${sheet?.type === 'newpw' && html`
+        <${Sheet} title="Nastav si nové heslo" onClose=${close}>
+          <${PasswordForm} label="Uložit nové heslo" onDone=${() => setTimeout(close, 1200)} />
+        <//>`}
+      ${needsWho && !sheet && html`
+        <${Sheet} title="Kdo jsi?" onClose=${() => setGid(null)}>
+          <${WhoSheet} group=${group} profile=${prof} onPick=${pickWho} />
+        <//>`}
+    </div>
+  `;
+}
+
+function Root() {
+  const [sess, setSess] = useState(getSession());
+  const [boot, setBoot] = useState(syncEnabled ? null : {});
+  useEffect(() => onAuthChange(setSess), []);
+  useEffect(() => {
+    if (!syncEnabled) return;
+    // Pozvánku otevřenou bez přihlášení si odložíme a použijeme hned po přihlášení.
+    const m = location.hash.match(/^#join=([a-f0-9]{32})$/);
+    if (m && !getSession()) {
+      try { sessionStorage.setItem(JKEY, m[1]); } catch {}
+      history.replaceState(null, '', location.pathname);
+    }
+    consumeUrl().then(setBoot).catch(() => setBoot({ error: 'Přihlášení se nepodařilo dokončit. Zkus to prosím znovu.' }));
+  }, []);
+
+  if (!boot) return html`<div class="empty">Načítám…</div>`;
+  if (syncEnabled && !sess) return html`<${AuthScreen} notice=${boot.error} />`;
+  const user = syncEnabled ? sess.user : null;
+  return html`<${App} key=${user?.id || 'local'} user=${user} recovery=${boot.type === 'recovery'} />`;
+}
+
+render(html`<${Root} />`, document.getElementById('root'));
+
+if ('serviceWorker' in navigator && !['localhost', '127.0.0.1'].includes(location.hostname)) {
+  navigator.serviceWorker.register('./sw.js').catch(() => {});
+}
