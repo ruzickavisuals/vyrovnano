@@ -1,7 +1,7 @@
 import { html, render, useState, useEffect, useMemo, useRef } from './vendor/preact-htm.js';
 import {
   CATS, cat, catOf, guessCategory, CURRENCIES, uid, today, fmt, parseAmount, allocate, baseAmount, shares,
-  balances, settle, stats, debtMove, toIban, spayd, dateLabel, seed,
+  balances, settle, stats, debtMove, vocative, toIban, spayd, dateLabel, seed,
 } from './logic.js';
 import {
   syncEnabled, shared, canon, merge, sanitize, sig, listRemote, joinRemote, leaveRemote,
@@ -396,7 +396,7 @@ function Welcome({ groups, name }) {
   return html`
     <div class="placeholder welcome">
       <div class="big">${quip[0]}</div>
-      <h2>${hello}${name ? `, ${name}` : ''}</h2>
+      <h2>${hello}${name ? `, ${vocative(name)}` : ''}</h2>
       ${groups.length === 0
         ? html`<p class="welcome-sum">Zatím tu nemáš žádnou skupinu. Vytvoř první vlevo.</p>`
         : lines.length === 0

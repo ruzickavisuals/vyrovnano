@@ -151,6 +151,34 @@ export function debtMove(source, target, pay, debtorIn, creditorIn, now = Date.n
   };
 }
 
+// Oslovení: křestní jméno v 5. pádu (Filip → Filipe, Patrik → Patriku, Vašek → Vašku, Petr → Petře).
+// Pravidla pokrývají běžná česká jména; co nepoznají (přezdívky s číslicemi, cizí tvary), nechají beze změny.
+const VOC_KEEP = new Set(['ester', 'dagmar', 'miriam', 'ingrid', 'karin', 'rut', 'ruth', 'judit', 'edit', 'nikol', 'nicol',
+  'carmen', 'ellen', 'elen', 'helen', 'karen', 'dolores', 'agnes', 'ines', 'iris', 'doris', 'lilian', 'vivien', 'marlen',
+  'sharon', 'kim', 'rachel', 'ráchel', 'abigail', 'mercedes', 'vanes']);
+const VOC_DROP_E = new Set(['pavel', 'karel', 'havel']);
+const VOWELS = 'aeiouyáéíóúýěů';
+export function vocative(name) {
+  const first = String(name || '').trim().split(/\s+/)[0] || '';
+  if (!/^\p{L}{2,}$/u.test(first)) return first;
+  const low = first.toLowerCase();
+  if (VOC_KEEP.has(low)) return first;
+  const cut = (n, add) => first.slice(0, first.length - n) + add;
+  const last = low.slice(-1), last2 = low.slice(-2), last3 = low.slice(-3);
+  if (last === 'a') return cut(1, 'o'); // Honza → Honzo, Jana → Jano
+  if ('eiíyýoóuúůéěá'.includes(last)) return first; // Jiří, Marie, Hugo
+  if (last3 === 'něk') return cut(3, 'ňku'); // Zdeněk → Zdeňku
+  if (last3 === 'děk') return cut(3, 'ďku'); // Luděk → Luďku
+  if (last3 === 'těk') return cut(3, 'ťku');
+  if (last2 === 'ek' || last2 === 'ěk') return cut(2, 'ku'); // Vašek → Vašku
+  if (last2 === 'ec') return cut(2, 'če'); // Vavřinec → Vavřinče
+  if (last2 === 'el') return VOC_DROP_E.has(low) ? cut(2, 'le') : first + 'i'; // Pavel → Pavle, Daniel → Danieli
+  if (last2 === 'ch' || 'kgh'.includes(last)) return first + 'u'; // Patrik → Patriku, Oldřich → Oldřichu
+  if (last === 'r') return VOWELS.includes(low.slice(-2, -1)) ? first + 'e' : cut(1, 'ře'); // Viktor → Viktore, Petr → Petře
+  if ('šžčřjcňťďsxz'.includes(last)) return first + 'i'; // Tomáš → Tomáši, Ondřej → Ondřeji
+  return first + 'e'; // Filip → Filipe, Albert → Alberte, Michal → Michale
+}
+
 export function stats(group) {
   const byCat = {}, consumed = {}, paid = {};
   let total = 0;
