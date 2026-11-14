@@ -494,7 +494,7 @@ function Debts({ group, bal, onPay, onQr }) {
                 </div>
                 <div class="pay-actions">
                   <button class="btn small" onClick=${() => onQr({ ...p, iban })}>QR platba</button>
-                  <button class="btn small pay" onClick=${() => onPay(p)}>Uhradit</button>
+                  <button class="btn small due" onClick=${() => onPay(p)}>Uhradit</button>
                 </div>
               </div>
             `;
@@ -659,7 +659,7 @@ function EntryForm({ group, entry, onSave, onDelete }) {
         </label>
         <div class="chips">
           ${CATS.map((c) => html`
-            <button type="button" class=${'chip' + (c.id === category ? ' on' : '')} onClick=${() => { setCategory(c.id); setCatTouched(true); }}>${c.e} ${c.n}</button>
+            <button type="button" class=${'chip' + (c.id === category ? ' on' : '')} onClick=${() => { setCategory(c.id); setCatTouched(true); }}><span>${c.e}</span><span>${c.n}</span></button>
           `)}
         </div>
       `}
@@ -837,7 +837,7 @@ function QrSheet({ group, pay, onPaid }) {
       <div class="qr-amount">${fmt(pay.amount, group.currency)}</div>
       <${Qr} alt="QR platba" text=${spayd(pay.iban, pay.amount, group.currency, `${group.name} - ${nameOf(group, pay.from)}`)} />
       <p class="hint">Naskenuj v bankovní aplikaci; částka i účet se vyplní samy. Účet: ${pay.iban}</p>
-      <button class="btn paid wide" onClick=${onPaid}>Uhrazeno, zapsat platbu</button>
+      <button class="btn done wide" onClick=${onPaid}>Uhrazeno, zapsat platbu</button>
     </div>
   `;
 }
