@@ -94,6 +94,10 @@ export function sanitize(d) {
       category: str(e.category, 20),
       date: /^\d{4}-\d{2}-\d{2}$/.test(e.date) ? e.date : today(),
       u: num(e.u),
+      // vazba dvou částí převodu dluhu mezi skupinami
+      mv: okId(e.mv) ? e.mv : undefined,
+      mvg: okId(e.mvg) ? e.mvg : undefined,
+      mvd: e.mvd === 'out' || e.mvd === 'in' ? e.mvd : undefined,
     }));
   const dead = {};
   if (d.dead && typeof d.dead === 'object') {

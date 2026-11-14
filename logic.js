@@ -135,6 +135,22 @@ export function settle(bal) {
   return out;
 }
 
+// Převod dluhu mezi skupinami. `pay` = { from: dlužník, to: věřitel, amount } ve zdrojové skupině,
+// `debtorIn` a `creditorIn` jsou titíž lidé v cílové skupině. Vrací dva provázané záznamy:
+//  out (do zdrojové skupiny)  – dlužník „zaplatil“ věřiteli, takže tam dluh zmizí,
+//  in  (do cílové skupiny)    – věřitel „půjčil“ dlužníkovi, takže tam stejný dluh vznikne.
+// Směr se nikdy neotáčí: kdo dlužil, dluží dál, jen v jiné skupině.
+export function debtMove(source, target, pay, debtorIn, creditorIn, now = Date.now()) {
+  const mv = uid();
+  const base = { kind: 'transfer', amount: pay.amount, rate: 1, mode: 'equal', category: 'other', date: today(), u: now, mv };
+  return {
+    out: { ...base, id: uid(), mvd: 'out', mvg: target.id, currency: source.currency,
+      title: `Převedeno do skupiny „${target.name}“`.slice(0, 120), paidBy: pay.from, parts: { [pay.to]: 1 } },
+    in: { ...base, id: uid(), mvd: 'in', mvg: source.id, currency: target.currency,
+      title: `Převedeno ze skupiny „${source.name}“`.slice(0, 120), paidBy: creditorIn.id, parts: { [debtorIn.id]: 1 } },
+  };
+}
+
 export function stats(group) {
   const byCat = {}, consumed = {}, paid = {};
   let total = 0;

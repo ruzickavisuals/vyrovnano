@@ -1,7 +1,7 @@
 import { html, render, useState, useEffect, useMemo, useRef } from './vendor/preact-htm.js';
 import {
   CATS, cat, catOf, guessCategory, CURRENCIES, uid, today, fmt, parseAmount, allocate, baseAmount, shares,
-  balances, settle, stats, toIban, spayd, dateLabel, seed,
+  balances, settle, stats, debtMove, toIban, spayd, dateLabel, seed,
 } from './logic.js';
 import {
   syncEnabled, shared, canon, merge, sanitize, sig, listRemote, joinRemote, leaveRemote,
@@ -449,16 +449,22 @@ function Entries({ group, onEntry }) {
         const base = baseAmount(e);
         if (e.kind === 'transfer') {
           const to = Object.keys(e.parts)[0];
+          // Dopad na můj zůstatek: kdo platí, tomu zůstatek roste; příjemci klesá.
+          const mineT = e.paidBy === group.me ? base : to === group.me ? -base : 0;
+          // Převedený dluh z jiné skupiny čteme jako „dlužník dluží věřiteli“, ne jako platbu.
+          const moved = e.mvd === 'in';
+          const paid = !e.mv && (!e.title || e.title === 'Převod' || /vyrovn|uhra[zd]/i.test(e.title));
           return html`
             <button class="item" onClick=${() => onEntry(e)}>
-              <span class="avatar sm">💱</span>
+              <span class="avatar sm">${e.mv ? '🔀' : '💱'}</span>
               <span class="grow">
-                <strong>${nameOf(group, e.paidBy)} → ${nameOf(group, to)}</strong>
-                <small>${!e.title || e.title === 'Převod' || /vyrovn|uhra[zd]/i.test(e.title)
-                  ? html`<span class="paid-tag">uhrazeno</span>`
-                  : html`<span class="muted">${e.title}</span>`}</small>
+                <strong>${moved ? `${nameOf(group, to)} dluží ${nameOf(group, e.paidBy)}` : `${nameOf(group, e.paidBy)} → ${nameOf(group, to)}`}</strong>
+                <small>${paid ? html`<span class="paid-tag">uhrazeno</span>` : html`<span class="muted">${e.title}</span>`}</small>
               </span>
-              <span class="right"><strong>${fmt(e.amount, e.currency)}</strong></span>
+              <span class="right">
+                <strong>${fmt(e.amount, e.currency)}</strong>
+                <small><${Balance} cents=${mineT} currency=${cur} zero="netýká se tě" /></small>
+              </span>
             </button>
           `;
         }
@@ -980,6 +986,24 @@ function MoveSheet({ group, groups, pay, onMove }) {
   `;
 }
 
+// Záznam o převedeném dluhu se neupravuje (musel by se měnit v obou skupinách zároveň),
+// dá se jen smazat – a to vždy v obou skupinách najednou.
+function MovedInfo({ group, entry, other, onDelete }) {
+  const to = Object.keys(entry.parts)[0];
+  const debtor = entry.mvd === 'in' ? to : entry.paidBy;
+  const creditor = entry.mvd === 'in' ? entry.paidBy : to;
+  return html`
+    <div class="form">
+      <p><strong>${nameOf(group, debtor)}</strong> dluží <strong>${nameOf(group, creditor)}</strong> <strong class="neg">${fmt(entry.amount, entry.currency)}</strong>.</p>
+      <p>${entry.mvd === 'in'
+        ? `Tento dluh sem byl převeden ze skupiny „${other ? other.name : 'ke které nemáš přístup'}“, kde tím zmizel.`
+        : `Tento dluh byl odsud převeden do skupiny „${other ? other.name : 'ke které nemáš přístup'}“, kde se připočetl.`}</p>
+      <p class="hint">Převod má dvě části, v každé skupině jednu. Mazat je jde jen společně, aby dluh nikde nezmizel ani nepřibyl navíc.</p>
+      <button class="btn danger wide" onClick=${onDelete}>Zrušit převod v obou skupinách</button>
+    </div>
+  `;
+}
+
 /* ---------- Zálohy ---------- */
 
 function downloadFile(name, text) {
@@ -1314,8 +1338,24 @@ function App({ user, recovery }) {
   // Mazání a zápis platby jsou špatně vratné, proto se vždy ptáme.
   async function deleteEntry(id) {
     const e = group.entries.find((x) => x.id === id);
-    if (!(await ask(`Opravdu smazat záznam „${e?.title || 'Převod'}“ (${e ? fmt(e.amount, e.currency) : ''})? Zmizí všem členům skupiny.`, { ok: 'Smazat' }))) return;
-    putGroup({ ...group, entries: group.entries.filter((x) => x.id !== id), dead: { ...(group.dead || {}), [id]: Date.now() } });
+    if (!e) return;
+    const now = Date.now();
+    const drop = (g, eid) => ({ ...g, entries: g.entries.filter((x) => x.id !== eid), dead: { ...(g.dead || {}), [eid]: now } });
+    if (e.mv) {
+      // Převedený dluh: druhá část leží v jiné skupině a maže se zároveň.
+      const other = groups.find((g) => g.id === e.mvg);
+      const twin = other?.entries.find((x) => x.mv === e.mv);
+      if (!other) {
+        return notify('Druhá část tohoto převodu je ve skupině, ke které nemáš přístup. Zrušit ho může jen někdo, kdo je v obou skupinách.');
+      }
+      const where = e.mvd === 'in' ? `vrátí do skupiny „${other.name}“` : `vrátí sem ze skupiny „${other.name}“`;
+      if (!(await ask(`Zrušit převod dluhu ${fmt(e.amount, e.currency)}? Smaže se v obou skupinách a dluh se ${where}.`, { ok: 'Zrušit převod' }))) return;
+      setGroups((gs) => gs.map((g) => (
+        g.id === group.id ? drop(g, e.id) : twin && g.id === other.id ? drop(g, twin.id) : g)));
+      return close();
+    }
+    if (!(await ask(`Opravdu smazat záznam „${e.title || 'Převod'}“ (${fmt(e.amount, e.currency)})? Zmizí všem členům skupiny.`, { ok: 'Smazat' }))) return;
+    putGroup(drop(group, id));
   }
   async function payDebt(p) {
     const msg = `Označit dluh jako uhrazený? ${nameOf(group, p.from)} → ${nameOf(group, p.to)}, ${fmt(p.amount, group.currency)}. Peníze tím nikam neodejdou, jen se platba zapíše do historie a dluh zmizí všem členům.`;
@@ -1329,14 +1369,12 @@ function App({ user, recovery }) {
   // který tam stejný dluh založí. Do statistik útraty se ani jeden nepočítá.
   async function moveDebt(pay, target, f, t) {
     const amount = fmt(pay.amount, group.currency);
-    if (!(await ask(`Převést dluh ${amount} (${nameOf(group, pay.from)} → ${nameOf(group, pay.to)}) do skupiny „${target.name}“? Tady zmizí a tam se připočte.`, { ok: 'Převést' }))) return;
-    const now = Date.now();
-    const base = { kind: 'transfer', amount: pay.amount, rate: 1, mode: 'equal', category: 'other', date: today(), u: now };
-    const out = { ...base, id: uid(), currency: group.currency, title: `Převedeno do skupiny „${target.name}“`.slice(0, 120), paidBy: pay.from, parts: { [pay.to]: 1 } };
-    const inn = { ...base, id: uid(), currency: target.currency, title: `Převedeno ze skupiny „${group.name}“`.slice(0, 120), paidBy: t.id, parts: { [f.id]: 1 } };
+    const msg = `Převést dluh ${amount} do skupiny „${target.name}“? ${nameOf(group, pay.from)} bude dál dlužit ${nameOf(group, pay.to)}, jen v jiné skupině: tady dluh zmizí a tam se připočte.`;
+    if (!(await ask(msg, { ok: 'Převést' }))) return;
+    const pair = debtMove(group, target, pay, f, t);
     setGroups((gs) => gs.map((g) => (
-      g.id === group.id ? { ...g, entries: [...g.entries, out] }
-      : g.id === target.id ? { ...g, entries: [...g.entries, inn] } : g)));
+      g.id === group.id ? { ...g, entries: [...g.entries, pair.out] }
+      : g.id === target.id ? { ...g, entries: [...g.entries, pair.in] } : g)));
     close();
   }
   function openQr(pay) {
@@ -1502,8 +1540,11 @@ function App({ user, recovery }) {
             onDelete=${() => removeGroup(sheet.group)} onBackups=${() => setSheet({ type: 'backups' })} />
         <//>`}
       ${sheet?.type === 'entry' && group && html`
-        <${Sheet} title=${sheet.entry ? 'Upravit záznam' : 'Nový záznam'} onClose=${close}>
-          <${EntryForm} group=${group} entry=${sheet.entry} onSave=${saveEntry} onDelete=${() => deleteEntry(sheet.entry.id)} />
+        <${Sheet} title=${sheet.entry?.mv ? 'Převedený dluh' : sheet.entry ? 'Upravit záznam' : 'Nový záznam'} onClose=${close}>
+          ${sheet.entry?.mv
+            ? html`<${MovedInfo} group=${group} entry=${sheet.entry} other=${groups.find((g) => g.id === sheet.entry.mvg)}
+                onDelete=${() => deleteEntry(sheet.entry.id)} />`
+            : html`<${EntryForm} group=${group} entry=${sheet.entry} onSave=${saveEntry} onDelete=${() => deleteEntry(sheet.entry.id)} />`}
         <//>`}
       ${sheet?.type === 'move' && group && html`
         <${Sheet} title="Převést dluh" onClose=${close}>
