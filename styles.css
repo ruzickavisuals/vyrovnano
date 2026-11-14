@@ -601,3 +601,22 @@ mark { background: color-mix(in srgb, var(--accent) 28%, transparent); color: in
 
 /* Velká částka ve formuláři zůstává velká i na telefonu. */
 @media (max-width: 899px) { .amount-row .amount { font-size: 30px !important; } }
+
+/* ---------- Spodní lišta: stále viditelná, s jemným barevným přechodem, plus bez záře ---------- */
+@media (max-width: 899px) {
+  .tabbar {
+    z-index: 30; /* nad celoobrazovkovými okny, pod potvrzovacími dialogy */
+    background:
+      linear-gradient(115deg,
+        color-mix(in srgb, var(--accent) 24%, var(--card)) 0%,
+        color-mix(in srgb, var(--card) 94%, transparent) 42%,
+        color-mix(in srgb, var(--card) 94%, transparent) 58%,
+        color-mix(in srgb, var(--pos) 20%, var(--card)) 100%);
+    border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--line));
+    box-shadow: 0 10px 28px rgb(0 0 0 / 0.32);
+  }
+  .tabbar .plus { box-shadow: none; border: 4px solid var(--bg); }
+  /* Obsah oken musí jít odrolovat nad lištu. */
+  .sheet-body { padding-bottom: calc(env(safe-area-inset-bottom) + 116px); }
+  .dialog-overlay { z-index: 60; }
+}
