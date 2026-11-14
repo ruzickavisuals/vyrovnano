@@ -1,4 +1,4 @@
-import { html, render, useState, useEffect, useMemo, useRef } from 'https://unpkg.com/htm@3.1.1/preact/standalone.module.js';
+import { html, render, useState, useEffect, useMemo, useRef } from './vendor/preact-htm.js';
 import {
   CATS, cat, catOf, guessCategory, CURRENCIES, uid, today, fmt, parseAmount, allocate, baseAmount, shares,
   balances, settle, stats, toIban, spayd, dateLabel, seed,
@@ -547,7 +547,7 @@ function GroupForm({ group, profile, deleteLabel, onSave, onDelete, onBackups })
 /* ---------- QR kódy ---------- */
 
 async function makeQr(text) {
-  const mod = await import('https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/+esm');
+  const mod = await import('./vendor/qrcode.js');
   const q = mod.default(0, 'M');
   q.addData(text);
   q.make();
