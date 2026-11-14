@@ -195,6 +195,75 @@ begin
 end;
 $$;
 
+-- ===== Zálohy =====
+-- Každou hodinu se uloží kopie každé skupiny, která se od poslední zálohy změnila.
+-- Uchovává se posledních 48 verzí na skupinu; starší se mažou.
+-- Zálohy smazaných skupin zůstávají 30 dní (obnovit je může jen správce projektu).
+create table if not exists public.group_backups (
+  group_id uuid not null,
+  taken_at timestamptz not null default now(),
+  version integer not null,
+  data jsonb not null,
+  primary key (group_id, taken_at)
+);
+alter table public.group_backups enable row level security;
+revoke all on public.group_backups from anon, authenticated;
+
+create or replace function public.backup_groups()
+returns void
+language plpgsql security definer set search_path = ''
+as $$
+begin
+  insert into public.group_backups (group_id, version, data)
+    select g.id, g.version, g.data from public.groups g
+    where not exists (select 1 from public.group_backups b where b.group_id = g.id and b.version = g.version);
+
+  delete from public.group_backups b
+    using (select x.group_id, x.taken_at,
+                  row_number() over (partition by x.group_id order by x.taken_at desc) as rn
+           from public.group_backups x) old
+    where b.group_id = old.group_id and b.taken_at = old.taken_at and old.rn > 48;
+
+  delete from public.group_backups b
+    where b.taken_at < now() - interval '30 days'
+      and not exists (select 1 from public.groups g where g.id = b.group_id);
+end;
+$$;
+revoke execute on function public.backup_groups() from public, anon, authenticated;
+
+-- Seznam záloh skupiny (jen pro člena).
+create or replace function public.list_backups(p_gid uuid)
+returns table (taken_at timestamptz, entries integer)
+language sql stable security definer set search_path = ''
+as $$
+  select b.taken_at, coalesce(jsonb_array_length(b.data -> 'entries'), 0)
+  from public.group_backups b
+  where b.group_id = p_gid
+    and exists (select 1 from public.group_members m where m.group_id = p_gid and m.user_id = auth.uid())
+  order by b.taken_at desc;
+$$;
+
+-- Obsah jedné zálohy (jen pro člena).
+create or replace function public.get_backup(p_gid uuid, p_taken_at timestamptz)
+returns jsonb
+language sql stable security definer set search_path = ''
+as $$
+  select b.data from public.group_backups b
+  where b.group_id = p_gid and b.taken_at = p_taken_at
+    and exists (select 1 from public.group_members m where m.group_id = p_gid and m.user_id = auth.uid());
+$$;
+
+revoke execute on function public.list_backups(uuid), public.get_backup(uuid, timestamptz) from public, anon;
+grant execute on function public.list_backups(uuid), public.get_backup(uuid, timestamptz) to authenticated;
+
+-- Hodinový plánovač (rozšíření pg_cron je součástí Supabase). Opakované spuštění úlohu jen přepíše.
+create extension if not exists pg_cron with schema pg_catalog;
+grant usage on schema cron to postgres;
+grant all privileges on all tables in schema cron to postgres;
+select cron.schedule('vyrovnano-hodinova-zaloha', '0 * * * *', 'select public.backup_groups()');
+-- První záloha hned teď.
+select public.backup_groups();
+
 -- Funkce smí volat jen přihlášený uživatel, nikdy anonymní návštěvník.
 revoke execute on function
   public.my_groups(), public.get_group(uuid), public.group_user_ids(uuid),

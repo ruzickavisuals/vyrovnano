@@ -130,6 +130,18 @@ export async function groupUserIds(gid) {
   return (Array.isArray(rows) ? rows : []).map(okUuid).filter(Boolean);
 }
 
+// Hodinové zálohy na serveru: seznam a obsah jedné zálohy (jen pro členy skupiny).
+export async function listBackups(gid) {
+  const rows = await rpc('list_backups', { p_gid: gid });
+  return (Array.isArray(rows) ? rows : [])
+    .filter((r) => typeof r.taken_at === 'string')
+    .map((r) => ({ at: r.taken_at, entries: num(r.entries) }));
+}
+export async function getBackup(gid, at) {
+  const data = await rpc('get_backup', { p_gid: gid, p_taken_at: at });
+  return data ? sanitize(data) : null;
+}
+
 // Stáhne aktuální stav, sloučí s lokálním a případně nahraje.
 // Vrací { data, invite, owner }, nebo { gone: true } když ke skupině už nemám přístup.
 export async function syncGroup(g) {

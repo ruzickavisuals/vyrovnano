@@ -3,12 +3,45 @@
 export const CATS = [
   { id: 'food', e: '🍽️', n: 'Jídlo' },
   { id: 'groceries', e: '🛒', n: 'Nákup' },
+  { id: 'coffee', e: '☕', n: 'Káva' },
+  { id: 'drinks', e: '🍺', n: 'Pití' },
+  { id: 'household', e: '🧽', n: 'Domácnost' },
+  { id: 'gear', e: '🛠️', n: 'Vybavení' },
+  { id: 'bills', e: '💡', n: 'Energie a služby' },
   { id: 'home', e: '🏠', n: 'Ubytování' },
   { id: 'transport', e: '🚗', n: 'Doprava' },
-  { id: 'drinks', e: '🍺', n: 'Pití' },
+  { id: 'sport', e: '🎾', n: 'Sport' },
   { id: 'fun', e: '🎉', n: 'Zábava' },
+  { id: 'gifts', e: '🎁', n: 'Dárky' },
+  { id: 'health', e: '💊', n: 'Zdraví' },
   { id: 'other', e: '📦', n: 'Ostatní' },
 ];
+
+// Rozpoznání kategorie z názvu výdaje. Běží přímo v zařízení, nic se nikam neposílá.
+// Pravidla jsou začátky slov bez diakritiky; platí první kategorie, která se trefí.
+const RULES = [
+  ['coffee', 'kav|kafe|kafi|kafc|coffee|espress|latte|cappuc|costa|tchibo|starbucks|nespresso|mot mot|kyselac'],
+  ['health', 'lekarn|leky|lek\\b|vitamin|elektrolyt|electrolyt|doktor|zubar|vilgain|protein'],
+  ['gifts', 'dar\\b|darek|dark[yu]|darec|narozenin|svatb|kytk|kvetin|vanoc'],
+  ['bills', 'internet|energi|elektrin|elektrik|plyn\\b|vodne|najem|najm|doplatek|poplat|pojist|netflix|spotify|predplat|tarif'],
+  ['sport', 'padel|tenis|fotbal|squash|badminton|bowling|posilovn|fitko|fitness|lyz|skipas|plavan|bazen|golf'],
+  ['fun', 'kino|vstupen|listk|koncert|ples\\b|festival|divadl|wellness|sauna|hry\\b|hra\\b|unikov|party|zabav|entertain'],
+  ['transport', 'benzin|nafta|phm|tankov|uber|bolt\\b|taxi|vlak|jizden|letenk|parkov|dalnic|mhd|autobus|cesta|pokut|transport|doprav|fuel'],
+  ['drinks', 'pivo|piva\\b|pivk|vino|vina\\b|vinec|drink|bar\\b|hospod|alkohol|rum\\b|gin\\b|prosecc|koktejl|panak|shot|ginger|piti'],
+  ['groceries', 'nakup|lidl|billa|tesco|kaufland|penny|globus|potravin|rohlik|kosik|makro|supermarket|grocer'],
+  ['food', 'restaur|obed|vecer|snidan|pizz|burger|sushi|poke|wolt|foodora|jidl|bistro|kebab|vietnam|pho\\b|asie|mexik|mechik|salsa|saigon|palacink|wafl|chalk|mcdonald|kfc|ramen|japchae|svacin|zmrzlin|dort|food|baget|polevk|gril'],
+  ['home', 'ubytov|accommod|airbnb|booking|hotel|chat[auye]\\b|chalup|apartm|hostel|kemp'],
+  ['household', 'uterk|pytl|mydl|houbic|sanytol|cistic|praci|toalet|airwick|vune|osvezov|uklid|uklizec|tepovan|kuchyn|prkynk|nuz\\b|pribor|talir|misk|sklenic|vidlic|filtr|odpad|drogeri|ubrousk|zarovk|led\\b'],
+  ['gear', 'regal|router|kamer|microsd|sd kart|zebrik|pohovk|gauc|vysavac|stativ|slider|box|hub\\b|usb|kabel|platn|sten[ay]\\b|bauhaus|hornbach|obi\\b|penetrac|vymalb|barv|kotv|narad|nabyt|stul\\b|zidl|monitor|ps5|konzol|desk[ay]\\b|ikea'],
+].map(([id, words]) => [id, new RegExp('\\b(?:' + words + ')')]);
+
+export function guessCategory(text) {
+  const t = String(text || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+  for (const [id, re] of RULES) if (re.test(t)) return id;
+  return 'other';
+}
+// Kategorie záznamu; kde chybí, odhadne se z názvu (platí i pro starší a importované výdaje).
+export const catOf = (e) => (e.category && e.category !== 'other' ? e.category : guessCategory(e.title));
 export const cat = (id) => CATS.find((c) => c.id === id) || CATS[CATS.length - 1];
 
 export const CURRENCIES = ['CZK', 'EUR', 'USD', 'GBP', 'PLN', 'HUF', 'CHF'];
@@ -35,8 +68,10 @@ export function parseAmount(str) {
 }
 
 // Rozdělí `total` podle vah tak, aby součet seděl přesně na haléř (metoda největších zbytků).
-export function allocate(total, weights) {
-  const ids = Object.keys(weights).filter((k) => weights[k] > 0);
+// Haléře, které po dělení zbudou, jdou nejdřív plátci (`first`), stejně jako v Settle Up.
+// Pořadí je pevně dané (podle id), aby na všech zařízeních vyšlo totéž.
+export function allocate(total, weights, first) {
+  const ids = Object.keys(weights).filter((k) => weights[k] > 0).sort();
   const sum = ids.reduce((s, k) => s + weights[k], 0);
   const out = {};
   if (!sum || !total) return out;
@@ -48,7 +83,7 @@ export function allocate(total, weights) {
     used += fl;
     return { id, r: exact - fl };
   });
-  rem.sort((a, b) => b.r - a.r);
+  rem.sort((a, b) => (b.id === first) - (a.id === first) || b.r - a.r || (a.id < b.id ? -1 : 1));
   for (let i = 0; i < total - used; i++) out[rem[i % rem.length].id]++;
   return out;
 }
@@ -56,7 +91,7 @@ export function allocate(total, weights) {
 // Částka záznamu přepočtená do měny skupiny.
 export const baseAmount = (e) => Math.round(e.amount * (e.rate || 1));
 // Kolik z daného záznamu připadá na koho (v měně skupiny).
-export const shares = (e) => allocate(baseAmount(e), e.parts);
+export const shares = (e) => allocate(baseAmount(e), e.parts, e.paidBy);
 
 // Kladný zůstatek = má dostat, záporný = dluží.
 export function balances(group) {
@@ -97,10 +132,13 @@ export function stats(group) {
   const byCat = {}, consumed = {}, paid = {};
   let total = 0;
   for (const e of group.entries) {
+    // Příjem (např. prodej společné věci) celkovou útratu snižuje.
+    if (e.kind === 'income') total -= baseAmount(e);
     if (e.kind !== 'expense') continue;
     const base = baseAmount(e);
     total += base;
-    byCat[e.category] = (byCat[e.category] || 0) + base;
+    const c = catOf(e);
+    byCat[c] = (byCat[c] || 0) + base;
     paid[e.paidBy] = (paid[e.paidBy] || 0) + base;
     const s = shares(e);
     for (const id in s) consumed[id] = (consumed[id] || 0) + s[id];

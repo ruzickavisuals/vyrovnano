@@ -1,11 +1,11 @@
 import { html, render, useState, useEffect, useMemo, useRef } from 'https://unpkg.com/htm@3.1.1/preact/standalone.module.js';
 import {
-  CATS, cat, CURRENCIES, uid, today, fmt, parseAmount, allocate, baseAmount, shares,
+  CATS, cat, catOf, guessCategory, CURRENCIES, uid, today, fmt, parseAmount, allocate, baseAmount, shares,
   balances, settle, stats, toIban, spayd, dateLabel, seed,
 } from './logic.js';
 import {
   syncEnabled, shared, canon, merge, sanitize, sig, listRemote, joinRemote, leaveRemote,
-  resetInvite, kickRemote, deleteAccount, groupUserIds, syncGroup,
+  resetInvite, kickRemote, deleteAccount, groupUserIds, syncGroup, listBackups, getBackup,
 } from './sync.js';
 import {
   getSession, onAuthChange, signUp, signIn, signInWithGoogle, sendPasswordReset,
@@ -100,7 +100,7 @@ function pickImage() {
 
 /* ---------- Domovská obrazovka ---------- */
 
-function Home({ groups, profile, onOpen, onNew, onProfile, onImport }) {
+function Home({ groups, profile, account, onOpen, onNew, onProfile, onImport }) {
   return html`
     <header class="top row">
       <div class="grow">
@@ -126,7 +126,7 @@ function Home({ groups, profile, onOpen, onNew, onProfile, onImport }) {
             <span class="avatar">${g.emoji}</span>
             <span class="grow">
               <strong>${g.name}</strong>
-              <small class="muted">${g.members.length} lidí · utraceno ${fmt(total, g.currency)}${g.members.filter((m) => m.uid).length > 1 ? ' · sdílená' : ''}</small>
+              <small class="muted">${g.members.length} lidí · utraceno ${fmt(total, g.currency)}${g.members.filter((m) => m.uid).length > 1 ? ' · sdílená' : ''}${account && !g.remote ? ' · čeká na odeslání' : ''}</small>
             </span>
             <span class="right">
               <small class="muted">${my > 0 ? 'dostaneš' : my < 0 ? 'dlužíš' : ''}</small>
@@ -212,7 +212,7 @@ function Entries({ group, onEntry }) {
         const mine = (inc ? -1 : 1) * ((e.paidBy === group.me ? base : 0) - (shares(e)[group.me] || 0));
         return html`
           <button class="item" onClick=${() => onEntry(e)}>
-            <span class="avatar sm">${inc ? '💰' : cat(e.category).e}</span>
+            <span class="avatar sm">${inc ? '💰' : cat(catOf(e)).e}</span>
             <span class="grow">
               <strong>${e.title}</strong>
               <small class="muted">${inc ? 'příjem · přijal(a)' : 'platil(a)'} ${nameOf(group, e.paidBy)}${e.currency !== cur ? ` · ${fmt(e.amount, e.currency)}` : ''}</small>
@@ -241,13 +241,16 @@ function Debts({ group, bal, onPay, onQr }) {
           ${plan.map((p) => {
             const iban = toIban(group.members.find((m) => m.id === p.to)?.iban);
             return html`
-              <div class="item static">
-                <span class="grow">
-                  <strong>${nameOf(group, p.from)} → ${nameOf(group, p.to)}</strong>
-                  <small class="neg">${fmt(p.amount, cur)}</small>
-                </span>
-                ${iban && html`<button class="btn small" onClick=${() => onQr({ ...p, iban })}>QR platba</button>`}
-                <button class="btn small primary" onClick=${() => onPay(p)}>Zaplaceno</button>
+              <div class="pay">
+                <div class="pay-row">
+                  <span class="pay-who"><${Avatar} m=${group.members.find((m) => m.id === p.from)} size=${40} /><span>${nameOf(group, p.from)}</span></span>
+                  <span class="pay-mid"><strong class="neg">${fmt(p.amount, cur)}</strong><span class="arrow" aria-label="platí">→</span></span>
+                  <span class="pay-who end"><span>${nameOf(group, p.to)}</span><${Avatar} m=${group.members.find((m) => m.id === p.to)} size=${40} /></span>
+                </div>
+                <div class="pay-actions">
+                  ${iban && html`<button class="btn small" onClick=${() => onQr({ ...p, iban })}>QR platba</button>`}
+                  <button class="btn small primary" onClick=${() => onPay(p)}>Zaplaceno</button>
+                </div>
               </div>
             `;
           })}
@@ -317,7 +320,8 @@ function EntryForm({ group, entry, onSave, onDelete }) {
   const [rateStr, setRateStr] = useState(String(init.rate).replace('.', ','));
   const [rateNote, setRateNote] = useState('');
   const [paidBy, setPaidBy] = useState(init.paidBy);
-  const [category, setCategory] = useState(init.category);
+  const [category, setCategory] = useState(entry ? catOf(entry) : init.category);
+  const [catTouched, setCatTouched] = useState(!!entry);
   const [date, setDate] = useState(init.date);
   const [mode, setMode] = useState(init.mode);
   const [parts, setParts] = useState(() =>
@@ -355,7 +359,7 @@ function EntryForm({ group, entry, onSave, onDelete }) {
 
   const weights = Object.fromEntries(
     members.map((m) => [m.id, mode === 'exact' ? parseAmount(parts[m.id]) : Number(parts[m.id]) || 0]));
-  const preview = allocate(amount, weights);
+  const preview = allocate(amount, weights, paidBy);
   const exactSum = Object.values(weights).reduce((a, b) => a + b, 0);
   const exactLeft = amount - exactSum;
 
@@ -399,11 +403,16 @@ function EntryForm({ group, entry, onSave, onDelete }) {
       ${kind !== 'transfer' && html`
         <label class="field">
           <span>Za co</span>
-          <input placeholder="např. Večeře" value=${title} onInput=${(e) => setTitle(e.target.value)} />
+          <input placeholder="např. Večeře" maxlength="120" value=${title} onInput=${(e) => {
+            setTitle(e.target.value);
+            // Kategorie se nastaví sama podle názvu, dokud ji uživatel nevybere ručně.
+            const g = guessCategory(e.target.value);
+            if (!catTouched && g !== 'other') setCategory(g);
+          }} />
         </label>
         <div class="chips">
           ${CATS.map((c) => html`
-            <button type="button" class=${'chip' + (c.id === category ? ' on' : '')} onClick=${() => setCategory(c.id)}>${c.e} ${c.n}</button>
+            <button type="button" class=${'chip' + (c.id === category ? ' on' : '')} onClick=${() => { setCategory(c.id); setCatTouched(true); }}>${c.e} ${c.n}</button>
           `)}
         </div>
       `}
@@ -467,7 +476,7 @@ function EntryForm({ group, entry, onSave, onDelete }) {
 
 /* ---------- Formulář skupiny ---------- */
 
-function GroupForm({ group, profile, deleteLabel, onSave, onDelete }) {
+function GroupForm({ group, profile, deleteLabel, onSave, onDelete, onBackups }) {
   const [name, setName] = useState(group?.name || '');
   const [emoji, setEmoji] = useState(group?.emoji || '👥');
   const [currency, setCurrency] = useState(group?.currency || 'CZK');
@@ -529,6 +538,7 @@ function GroupForm({ group, profile, deleteLabel, onSave, onDelete }) {
       <button type="button" class="btn wide" onClick=${() => setMembers((ms) => [...ms, { id: uid(), name: '' }])}>+ Přidat člena</button>
 
       <button class="btn primary wide" disabled=${!!error}>${error || (group ? 'Uložit' : 'Vytvořit skupinu')}</button>
+      ${group && html`<button type="button" class="btn wide" onClick=${onBackups}>Zálohy a export</button>`}
       ${group && html`<button type="button" class="btn danger wide" onClick=${onDelete}>${deleteLabel}</button>`}
     </form>
   `;
@@ -636,6 +646,52 @@ function WhoSheet({ group, profile, onPick }) {
         <input value=${name} maxlength="60" placeholder="Tvoje jméno" onInput=${(e) => setName(e.target.value)} />
       </label>
       <button class="btn wide" disabled=${!name.trim()} onClick=${() => onPick(null, name.trim())}>Přidat mě do skupiny</button>
+    </div>
+  `;
+}
+
+/* ---------- Zálohy ---------- */
+
+function downloadFile(name, text) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([text], { type: 'application/json' }));
+  a.download = name;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+}
+
+function BackupSheet({ group, user, onRestore }) {
+  const [list, setList] = useState(user && group.remote ? null : []);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    if (user && group.remote) listBackups(group.id).then(setList).catch(() => { setFailed(true); setList([]); });
+  }, []);
+  const when = (iso) => new Date(iso).toLocaleString('cs-CZ', { day: 'numeric', month: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+  return html`
+    <div class="form">
+      <button class="btn wide" onClick=${() => downloadFile(
+        `${group.name.replace(/[^\p{L}\p{N} _-]/gu, '').trim() || 'skupina'}-${today()}.json`,
+        JSON.stringify({ app: 'vyrovnano', exported: new Date().toISOString(), group: shared(group) }, null, 1))}>
+        Stáhnout kopii skupiny do zařízení
+      </button>
+      <p class="hint">Soubor obsahuje všechny výdaje, členy a jejich fotky. Uložte si ho tam, kam nemá přístup nikdo cizí.</p>
+
+      <div class="field"><span>Zálohy na serveru</span></div>
+      ${list === null && html`<p class="muted">Načítám…</p>`}
+      ${list && list.length === 0 && html`<p class="muted">${
+        !user ? 'Zálohy na serveru jsou dostupné po přihlášení.'
+        : failed ? 'Zálohy se nepodařilo načíst.'
+        : 'Zatím žádná záloha. První vznikne do hodiny po změně ve skupině.'}</p>`}
+      ${list && list.length > 0 && html`
+        <div class="card list">
+          ${list.map((b) => html`
+            <div class="item static">
+              <span class="grow"><strong>${when(b.at)}</strong><small class="muted">${b.entries} záznamů</small></span>
+              <button class="btn small" onClick=${() => onRestore(b.at, when(b.at))}>Obnovit</button>
+            </div>
+          `)}
+        </div>`}
+      <p class="hint">Záloha vzniká každou hodinu, pokud se skupina změnila. Uchovává se posledních 48 verzí; starší se přepisují.</p>
     </div>
   `;
 }
@@ -977,6 +1033,28 @@ function App({ user, recovery }) {
     setGid(null);
     close();
   }
+  // Obnova ze zálohy: záznamy ze zálohy dostanou nové časové razítko, aby při slučování
+  // vyhrály nad novějším stavem; záznamy, které v záloze nejsou, se označí jako smazané.
+  async function restoreBackup(at, label) {
+    if (!confirm(`Obnovit skupinu do stavu z ${label}? Změny provedené po tomto čase zmizí všem členům.`)) return;
+    try {
+      const data = await getBackup(group.id, at);
+      if (!data) throw new Error('nenalezeno');
+      const now = Date.now();
+      const keep = new Set(data.entries.map((e) => e.id));
+      const dead = { ...(group.dead || {}) };
+      for (const e of group.entries) if (!keep.has(e.id)) dead[e.id] = now;
+      // Propojení členů s účty bereme ze současného stavu, ať nikdo nepřijde o přístup k „sobě“.
+      const members = data.members.map((m) => ({ ...m, uid: group.members.find((x) => x.id === m.id)?.uid }));
+      for (const m of group.members) if (m.uid && !members.some((x) => x.id === m.id)) members.push(m);
+      putGroup(withMe({
+        ...group, name: data.name, emoji: data.emoji, members, dead, mu: now,
+        entries: data.entries.map((e) => ({ ...e, u: now })),
+      }));
+    } catch {
+      alert('Zálohu se nepodařilo obnovit. Zkus to prosím znovu.');
+    }
+  }
   async function doReset() {
     if (!confirm('Zrušit současný odkaz? Kdo ho má a ještě se nepřipojil, už se s ním nepřipojí.')) return;
     try {
@@ -1031,14 +1109,14 @@ function App({ user, recovery }) {
               id: uid(), kind: 'transfer', title: 'Převod', amount: p.amount, currency: group.currency, rate: 1,
               paidBy: p.from, mode: 'equal', parts: { [p.to]: 1 }, category: 'other', date: today(),
             })} />`
-        : html`<${Home} groups=${groups} profile=${prof} onOpen=${setGid}
+        : html`<${Home} groups=${groups} profile=${prof} account=${!!user} onOpen=${setGid}
             onNew=${() => setSheet({ type: 'group' })} onProfile=${() => setSheet({ type: 'profile' })} onImport=${importSettleUp} />`}
 
       ${sheet?.type === 'group' && html`
         <${Sheet} title=${sheet.group ? 'Upravit skupinu' : 'Nová skupina'} onClose=${close}>
           <${GroupForm} group=${sheet.group} profile=${prof} onSave=${saveGroupForm}
             deleteLabel=${!user ? 'Smazat skupinu' : sheet.group?.members.some((m) => m.uid && m.uid !== user.id) ? 'Opustit skupinu' : 'Smazat skupinu'}
-            onDelete=${() => removeGroup(sheet.group)} />
+            onDelete=${() => removeGroup(sheet.group)} onBackups=${() => setSheet({ type: 'backups' })} />
         <//>`}
       ${sheet?.type === 'entry' && group && html`
         <${Sheet} title=${sheet.entry ? 'Upravit záznam' : 'Nový záznam'} onClose=${close}>
@@ -1051,6 +1129,10 @@ function App({ user, recovery }) {
       ${sheet?.type === 'share' && group && html`
         <${Sheet} title="Sdílení skupiny" onClose=${close}>
           <${ShareSheet} group=${group} user=${user} syncState=${syncState} onReset=${doReset} onKick=${doKick} />
+        <//>`}
+      ${sheet?.type === 'backups' && group && html`
+        <${Sheet} title="Zálohy a export" onClose=${close}>
+          <${BackupSheet} group=${group} user=${user} onRestore=${restoreBackup} />
         <//>`}
       ${sheet?.type === 'profile' && html`
         <${Sheet} title="Můj profil" onClose=${close}>

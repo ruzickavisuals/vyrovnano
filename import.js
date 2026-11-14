@@ -1,5 +1,5 @@
 // Import skupiny z exportu aplikace Settle Up (soubor CSV).
-import { uid, today } from './logic.js';
+import { uid, today, guessCategory } from './logic.js';
 
 // Settle Up exportuje v kódování UTF-16; jiné nástroje v UTF-8. Poznáme to podle prvních bajtů.
 export function decodeText(buffer) {
@@ -36,15 +36,10 @@ export function parseCsv(text) {
 const cents = (v) => Math.round(Math.abs(parseFloat(String(v).replace(',', '.')) || 0) * 100);
 const list = (v) => String(v || '').split(';').map((x) => x.trim()).filter(Boolean);
 
-function category(label) {
-  const l = String(label || '').toLowerCase();
-  if (/☕|káv|kava|coffee|🍺|drink|pití/.test(l)) return 'drinks';
-  if (/🍲|🍽|food|jídl|restaur/.test(l)) return 'food';
-  if (/🛒|grocer|nákup/.test(l)) return 'groceries';
-  if (/🛌|🏠|accomm|ubytov|bydlen/.test(l)) return 'home';
-  if (/🚗|✈|transport|doprav|car|fuel/.test(l)) return 'transport';
-  if (/🎉|entertain|zábav|fun/.test(l)) return 'fun';
-  return 'other';
+// Kategorie: nejdřív podle štítku ze Settle Up, jinak podle názvu výdaje.
+function category(label, purpose) {
+  const fromLabel = guessCategory(label);
+  return fromLabel !== 'other' ? fromLabel : guessCategory(purpose);
 }
 
 // Vrací novou skupinu (bez id) a krátké shrnutí. Při neznámém formátu vyhodí chybu.
@@ -102,7 +97,7 @@ export function parseSettleUp(text, fileName) {
     const when = String(r[C.date] || '');
     const date = /^\d{4}-\d{2}-\d{2}/.test(when) ? when.slice(0, 10) : today();
     const stamp = (Date.parse(when.replace(' ', 'T')) || 0) + index;
-    const base = { currency: cur, rate, date, u: stamp, category: category(r[C.category]) };
+    const base = { currency: cur, rate, date, u: stamp, category: category(r[C.category], r[C.purpose]) };
     const purpose = String(r[C.purpose] || '').trim().slice(0, 120);
 
     payers.forEach((p, pi) => {
