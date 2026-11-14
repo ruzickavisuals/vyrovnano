@@ -62,6 +62,117 @@ function Seg({ options, value, onChange }) {
   `;
 }
 
+/* ---------- Vlastní okna a nabídky (žádné systémové dialogy ani rozbalovací seznamy) ---------- */
+
+let openDialog = null;
+// Potvrzovací okno ve vzhledu aplikace; vrací true/false.
+const ask = (message, opts = {}) =>
+  new Promise((resolve) => (openDialog ? openDialog({ message, resolve, ...opts }) : resolve(false)));
+// Informační okno s jedním tlačítkem.
+const notify = (message) =>
+  new Promise((resolve) => (openDialog ? openDialog({ message, resolve, info: true }) : resolve(true)));
+
+function DialogHost() {
+  const [d, setD] = useState(null);
+  const done = (v) => { setD(null); d.resolve(v); };
+  useEffect(() => { openDialog = setD; return () => { openDialog = null; }; }, []);
+  useEffect(() => {
+    if (!d) return;
+    const key = (e) => { if (e.key === 'Escape') done(false); };
+    document.addEventListener('keydown', key);
+    return () => document.removeEventListener('keydown', key);
+  }, [d]);
+  if (!d) return null;
+  return html`
+    <div class="overlay dialog-overlay" onClick=${(e) => e.target === e.currentTarget && done(false)}>
+      <div class="dialog" role="alertdialog" aria-modal="true">
+        <p>${d.message}</p>
+        <div class="dialog-actions">
+          ${!d.info && html`<button class="btn" onClick=${() => done(false)}>Zrušit</button>`}
+          <button class="btn primary" onClick=${() => done(true)}>${d.info ? 'Rozumím' : d.ok || 'Potvrdit'}</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+// Zavře otevřenou nabídku při kliknutí mimo ni nebo klávesou Esc.
+function useDismiss(ref, open, close) {
+  useEffect(() => {
+    if (!open) return;
+    const out = (e) => { if (ref.current && !ref.current.contains(e.target)) close(); };
+    const key = (e) => { if (e.key === 'Escape') close(); };
+    document.addEventListener('pointerdown', out);
+    document.addEventListener('keydown', key);
+    return () => { document.removeEventListener('pointerdown', out); document.removeEventListener('keydown', key); };
+  }, [open]);
+}
+
+// Rozbalovací nabídka. options = [[hodnota, popisek], …]; popisek může být i obsah s fotkou.
+function Select({ value, options, onChange, label, disabled }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef();
+  useDismiss(ref, open, () => setOpen(false));
+  const cur = options.find((o) => o[0] === value);
+  return html`
+    <div class="select" ref=${ref} onClick=${(e) => e.preventDefault()}>
+      <button type="button" class="select-btn" aria-haspopup="listbox" aria-expanded=${open} aria-label=${label}
+        disabled=${disabled} onClick=${() => setOpen(!open)}>
+        <span class="select-val">${cur ? cur[1] : ''}</span><i aria-hidden="true">▾</i>
+      </button>
+      ${open && html`
+        <div class="select-menu" role="listbox">
+          ${options.map(([v, l]) => html`
+            <button type="button" role="option" aria-selected=${v === value} class=${'menu-item' + (v === value ? ' on' : '')}
+              onClick=${() => { onChange(v); setOpen(false); }}>${l}</button>
+          `)}
+        </div>`}
+    </div>
+  `;
+}
+
+// Výběr data s vlastním kalendářem.
+function DateField({ value, onChange }) {
+  const [open, setOpen] = useState(false);
+  const [view, setView] = useState(value.slice(0, 7));
+  const ref = useRef();
+  useDismiss(ref, open, () => setOpen(false));
+  const [y, m] = view.split('-').map(Number);
+  const first = new Date(y, m - 1, 1);
+  const offset = (first.getDay() + 6) % 7;
+  const days = new Date(y, m, 0).getDate();
+  const shift = (d) => {
+    const n = new Date(y, m - 1 + d, 1);
+    setView(`${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, '0')}`);
+  };
+  const iso = (d) => `${view}-${String(d).padStart(2, '0')}`;
+  const label = new Date(value + 'T12:00:00').toLocaleDateString('cs-CZ', { day: 'numeric', month: 'numeric', year: 'numeric' });
+  return html`
+    <div class="select" ref=${ref} onClick=${(e) => e.preventDefault()}>
+      <button type="button" class="select-btn" aria-label="Datum" aria-expanded=${open}
+        onClick=${() => { setView(value.slice(0, 7)); setOpen(!open); }}>
+        <span class="select-val">${label}</span><i aria-hidden="true">▾</i>
+      </button>
+      ${open && html`
+        <div class="select-menu cal right">
+          <div class="cal-head">
+            <button type="button" class="cal-nav" onClick=${() => shift(-1)} aria-label="Předchozí měsíc">‹</button>
+            <strong>${first.toLocaleDateString('cs-CZ', { month: 'long', year: 'numeric' })}</strong>
+            <button type="button" class="cal-nav" onClick=${() => shift(1)} aria-label="Další měsíc">›</button>
+          </div>
+          <div class="cal-grid">
+            ${['Po', 'Út', 'St', 'Čt', 'Pá', 'So', 'Ne'].map((d) => html`<span class="dow">${d}</span>`)}
+            ${Array.from({ length: offset }, () => html`<span></span>`)}
+            ${Array.from({ length: days }, (_, i) => html`
+              <button type="button" class=${'cal-day' + (iso(i + 1) === value ? ' on' : iso(i + 1) === today() ? ' today' : '')}
+                onClick=${() => { onChange(iso(i + 1)); setOpen(false); }}>${i + 1}</button>
+            `)}
+          </div>
+        </div>`}
+    </div>
+  `;
+}
+
 function Balance({ cents, currency, zero = 'vyrovnáno' }) {
   if (!cents) return html`<span class="muted">${zero}</span>`;
   return html`<span class=${cents > 0 ? 'pos' : 'neg'}>${cents > 0 ? '+' : '−'}${fmt(Math.abs(cents), currency)}</span>`;
@@ -240,6 +351,7 @@ function Debts({ group, bal, onPay, onQr }) {
   const plan = settle(bal);
   const max = Math.max(1, ...Object.values(bal).map(Math.abs));
   return html`
+    <h2 class="panel-title">Dluhy</h2>
     <h3 class="day">Jak se vyrovnat</h3>
     ${plan.length === 0
       ? html`<div class="card pad center">🎉 Všichni jsou vyrovnaní.</div>`
@@ -255,7 +367,7 @@ function Debts({ group, bal, onPay, onQr }) {
                   <span class="pay-who end"><span>${nameOf(group, p.to)}</span><${Avatar} m=${group.members.find((m) => m.id === p.to)} size=${40} /></span>
                 </div>
                 <div class="pay-actions">
-                  ${iban && html`<button class="btn small" onClick=${() => onQr({ ...p, iban })}>QR platba</button>`}
+                  <button class="btn small" onClick=${() => onQr({ ...p, iban })}>QR platba</button>
                   <button class="btn small primary" onClick=${() => onPay(p)}>Zaplaceno</button>
                 </div>
               </div>
@@ -289,6 +401,7 @@ function Stats({ group, st }) {
   const cats = Object.entries(st.byCat).sort((a, b) => b[1] - a[1]);
   const maxP = Math.max(1, ...group.members.map((m) => Math.max(st.consumed[m.id] || 0, st.paid[m.id] || 0)));
   return html`
+    <h2 class="panel-title">Přehled</h2>
     <h3 class="day">Za co se utrácelo</h3>
     <div class="card pad">
       ${cats.map(([id, v]) => html`
@@ -395,9 +508,8 @@ function EntryForm({ group, entry, onSave, onDelete }) {
 
       <div class="amount-row">
         <input class="amount" inputmode="decimal" placeholder="0" value=${amountStr} onInput=${(e) => setAmountStr(e.target.value)} aria-label="Částka" />
-        <select value=${currency} onChange=${(e) => pickCurrency(e.target.value)} aria-label="Měna">
-          ${[...new Set([group.currency, ...CURRENCIES])].map((c) => html`<option value=${c}>${c}</option>`)}
-        </select>
+        <div class="cur-pick"><${Select} label="Měna" value=${currency} onChange=${pickCurrency}
+          options=${[...new Set([group.currency, ...CURRENCIES])].map((c) => [c, c])} /></div>
       </div>
       ${foreign && html`
         <label class="field">
@@ -427,22 +539,20 @@ function EntryForm({ group, entry, onSave, onDelete }) {
       <div class="two">
         <label class="field">
           <span>${kind === 'transfer' ? 'Kdo platí' : kind === 'income' ? 'Kdo peníze přijal' : 'Kdo platil'}</span>
-          <select value=${paidBy} onChange=${(e) => setPaidBy(e.target.value)}>
-            ${members.map((m) => html`<option value=${m.id}>${m.name}</option>`)}
-          </select>
+          <${Select} label="Plátce" value=${paidBy} onChange=${setPaidBy}
+            options=${members.map((m) => [m.id, html`<span class="opt"><${Avatar} m=${m} size=${22} />${m.name}</span>`])} />
         </label>
         ${kind === 'transfer'
           ? html`
             <label class="field">
               <span>Komu</span>
-              <select value=${to} onChange=${(e) => setTo(e.target.value)}>
-                ${members.map((m) => html`<option value=${m.id}>${m.name}</option>`)}
-              </select>
+              <${Select} label="Příjemce" value=${to} onChange=${setTo}
+                options=${members.map((m) => [m.id, html`<span class="opt"><${Avatar} m=${m} size=${22} />${m.name}</span>`])} />
             </label>`
           : html`
             <label class="field">
               <span>Kdy</span>
-              <input type="date" value=${date} onInput=${(e) => setDate(e.target.value)} />
+              <${DateField} value=${date} onChange=${setDate} />
             </label>`}
       </div>
 
@@ -518,9 +628,8 @@ function GroupForm({ group, profile, userId, admin, deleteLabel, onSave, onDelet
       </div>
       <label class="field">
         <span>Měna skupiny</span>
-        <select value=${currency} disabled=${!!group?.entries.length} onChange=${(e) => setCurrency(e.target.value)}>
-          ${CURRENCIES.map((c) => html`<option value=${c}>${c}</option>`)}
-        </select>
+        <${Select} label="Měna skupiny" value=${currency} disabled=${!!group?.entries.length} onChange=${setCurrency}
+          options=${CURRENCIES.map((c) => [c, c])} />
         ${group?.entries.length ? html`<small class="muted">Měnu nejde změnit, skupina už má výdaje.</small>` : ''}
       </label>
 
@@ -578,13 +687,14 @@ function Qr({ text, alt }) {
     : html`<p class="muted">${err ? 'QR kód se nepodařilo vytvořit (jsi offline?).' : 'Vytvářím QR kód…'}</p>`;
 }
 
-function QrSheet({ group, pay }) {
+function QrSheet({ group, pay, onPaid }) {
   return html`
     <div class="qr">
       <p><strong>${nameOf(group, pay.from)}</strong> platí <strong>${nameOf(group, pay.to)}</strong></p>
       <div class="qr-amount">${fmt(pay.amount, group.currency)}</div>
       <${Qr} alt="QR platba" text=${spayd(pay.iban, pay.amount, group.currency, `${group.name} - ${nameOf(group, pay.from)}`)} />
-      <p class="hint">Naskenuj v bankovní aplikaci. Účet: ${pay.iban}</p>
+      <p class="hint">Naskenuj v bankovní aplikaci; částka i účet se vyplní samy. Účet: ${pay.iban}</p>
+      <button class="btn primary wide" onClick=${onPaid}>Zaplaceno, zapsat převod</button>
     </div>
   `;
 }
@@ -955,17 +1065,17 @@ function App({ user, recovery }) {
 
   /* --- pozvánky --- */
   async function join(token) {
-    if (!user) return alert('Sdílení zatím není zapnuté.');
+    if (!user) return notify('Sdílení zatím není zapnuté.');
     try {
       const row = await joinRemote(token);
-      if (!row) return alert('Pozvánka je neplatná nebo už byla zrušena.');
+      if (!row) return notify('Pozvánka je neplatná nebo už byla zrušena.');
       setGroups((gs) => (gs.some((g) => g.id === row.id)
         ? gs
         : [...gs, withMe({ id: row.id, remote: true, invite: row.invite, owner: row.owner, ...row.data })]));
       setSheet(null);
       setGid(row.id);
     } catch {
-      alert('Pozvánku se nepodařilo otevřít. Jsi online?');
+      notify('Pozvánku se nepodařilo otevřít. Jsi online?');
     }
   }
   useEffect(() => {
@@ -1001,14 +1111,32 @@ function App({ user, recovery }) {
     const has = group.entries.some((x) => x.id === e.id);
     putGroup({ ...group, entries: has ? group.entries.map((x) => (x.id === e.id ? entry : x)) : [...group.entries, entry] });
   };
-  const deleteEntry = (id) =>
+  // Mazání a zápis platby jsou špatně vratné, proto se vždy ptáme.
+  async function deleteEntry(id) {
+    const e = group.entries.find((x) => x.id === id);
+    if (!(await ask(`Opravdu smazat záznam „${e?.title || 'Převod'}“ (${e ? fmt(e.amount, e.currency) : ''})? Zmizí všem členům skupiny.`, { ok: 'Smazat' }))) return;
     putGroup({ ...group, entries: group.entries.filter((x) => x.id !== id), dead: { ...(group.dead || {}), [id]: Date.now() } });
+  }
+  async function payDebt(p) {
+    const msg = `Zapsat, že ${nameOf(group, p.from)} zaplatil(a) ${fmt(p.amount, group.currency)} pro ${nameOf(group, p.to)}? Dluh tím zmizí všem členům.`;
+    if (!(await ask(msg, { ok: 'Zapsat platbu' }))) return;
+    saveEntry({
+      id: uid(), kind: 'transfer', title: 'Převod', amount: p.amount, currency: group.currency, rate: 1,
+      paidBy: p.from, mode: 'equal', parts: { [p.to]: 1 }, category: 'other', date: today(),
+    });
+  }
+  function openQr(pay) {
+    if (!pay.iban) {
+      return notify(`${nameOf(group, pay.to)} nemá vyplněné číslo účtu, takže QR platbu nejde vytvořit. Číslo účtu si každý doplní sám v nastavení skupiny (ikona ozubeného kola).`);
+    }
+    setSheet({ type: 'qr', pay });
+  }
 
   const needsWho = group && !group.members.some((m) => m.id === group.me);
   function pickWho(id, newName) {
     const mine = { uid: user?.id };
     const taken = id && group.members.find((m) => m.id === id)?.uid;
-    if (taken && taken !== user?.id) return alert('Tohoto člena si mezitím vybral někdo jiný. Vyber prosím jiného.');
+    if (taken && taken !== user?.id) return notify('Tohoto člena si mezitím vybral někdo jiný. Vyber prosím jiného.');
     if (id) {
       putGroup({ ...group, mu: Date.now(), me: id,
         members: group.members.map((m) => (m.id === id ? { ...m, ...mine, avatar: m.avatar || profile.avatar } : m)) });
@@ -1039,13 +1167,13 @@ function App({ user, recovery }) {
       try {
         const { group: g, imported, skipped } = parseSettleUp(decodeText(await file.arrayBuffer()), file.name);
         if (ref.current.some((x) => x.name === g.name) &&
-            !confirm(`Skupinu „${g.name}“ už máš. Importovat ji znovu jako další skupinu?`)) return;
+            !(await ask(`Skupinu „${g.name}“ už máš. Importovat ji znovu jako další skupinu?`))) return;
         const id = user ? crypto.randomUUID() : uid();
         setGroups((gs) => [...gs, { ...g, id, mu: Date.now() }]);
         setGid(id);
-        if (skipped) alert(`Načteno ${imported} záznamů. ${skipped} řádků se nepodařilo přečíst a bylo přeskočeno.`);
+        if (skipped) notify(`Načteno ${imported} záznamů. ${skipped} řádků se nepodařilo přečíst a bylo přeskočeno.`);
       } catch (e) {
-        alert(e.message || 'Soubor se nepodařilo načíst.');
+        notify(e.message || 'Soubor se nepodařilo načíst.');
       }
     };
     input.click();
@@ -1056,11 +1184,11 @@ function App({ user, recovery }) {
       const msg = others
         ? `Opustit skupinu „${g.name}“? Ztratíš k ní přístup, ostatním členům zůstane.`
         : `Smazat skupinu „${g.name}“ se všemi výdaji? Nikdo další k ní přístup nemá, takže zmizí úplně.`;
-      if (!confirm(msg)) return;
+      if (!(await ask(msg))) return;
       if (g.remote) {
-        try { await leaveRemote(g.id); } catch { return alert('Nepodařilo se. Zkus to znovu, až budeš online.'); }
+        try { await leaveRemote(g.id); } catch { return notify('Nepodařilo se. Zkus to znovu, až budeš online.'); }
       }
-    } else if (!confirm(`Opravdu smazat skupinu „${g.name}“ se všemi výdaji?`)) return;
+    } else if (!(await ask(`Opravdu smazat skupinu „${g.name}“ se všemi výdaji?`))) return;
     delete synced.current[g.id];
     setGroups((gs) => gs.filter((x) => x.id !== g.id));
     setGid(null);
@@ -1069,7 +1197,7 @@ function App({ user, recovery }) {
   // Obnova ze zálohy: záznamy ze zálohy dostanou nové časové razítko, aby při slučování
   // vyhrály nad novějším stavem; záznamy, které v záloze nejsou, se označí jako smazané.
   async function restoreBackup(at, label) {
-    if (!confirm(`Obnovit skupinu do stavu z ${label}? Změny provedené po tomto čase zmizí všem členům.`)) return;
+    if (!(await ask(`Obnovit skupinu do stavu z ${label}? Změny provedené po tomto čase zmizí všem členům.`))) return;
     try {
       const data = await getBackup(group.id, at);
       if (!data) throw new Error('nenalezeno');
@@ -1085,20 +1213,20 @@ function App({ user, recovery }) {
         entries: data.entries.map((e) => ({ ...e, u: now })),
       }));
     } catch {
-      alert('Zálohu se nepodařilo obnovit. Zkus to prosím znovu.');
+      notify('Zálohu se nepodařilo obnovit. Zkus to prosím znovu.');
     }
   }
   async function doReset() {
-    if (!confirm('Zrušit současný odkaz? Kdo ho má a ještě se nepřipojil, už se s ním nepřipojí.')) return;
+    if (!(await ask('Zrušit současný odkaz? Kdo ho má a ještě se nepřipojil, už se s ním nepřipojí.'))) return;
     try {
       const t = await resetInvite(group.id);
       if (/^[0-9a-f]{32}$/.test(t)) setGroups((gs) => gs.map((g) => (g.id === group.id ? { ...g, invite: t } : g)));
     } catch {
-      alert('Nepodařilo se. Zkus to prosím znovu.');
+      notify('Nepodařilo se. Zkus to prosím znovu.');
     }
   }
   async function doKick(userId, name) {
-    if (!confirm(`Odebrat přístup: ${name || 'tento účet'}? Skupinu už neuvidí a starý odkaz přestane platit. Jeho výdaje ve skupině zůstanou.`)) return;
+    if (!(await ask(`Odebrat přístup: ${name || 'tento účet'}? Skupinu už neuvidí a starý odkaz přestane platit. Jeho výdaje ve skupině zůstanou.`))) return;
     try {
       const t = await kickRemote(group.id, userId);
       setGroups((gs) => gs.map((g) => (g.id !== group.id ? g : {
@@ -1106,12 +1234,12 @@ function App({ user, recovery }) {
         members: g.members.map((m) => (m.uid === userId ? { ...m, uid: undefined } : m)),
       })));
     } catch {
-      alert('Nepodařilo se. Zkus to prosím znovu.');
+      notify('Nepodařilo se. Zkus to prosím znovu.');
     }
   }
   async function logout(skipConfirm) {
     const dirty = groups.some((g) => sig(g) !== synced.current[g.id]);
-    if (!skipConfirm && dirty && !confirm('Některé změny se ještě neodeslaly na server a odhlášením se ztratí. Opravdu se odhlásit?')) return;
+    if (!skipConfirm && dirty && !(await ask('Některé změny se ještě neodeslaly na server a odhlášením se ztratí. Opravdu se odhlásit?'))) return;
     // Při odhlášení z tohoto zařízení mažeme i uložená data, ať je neuvidí další člověk u stejného telefonu.
     leaving.current = true;
     localStorage.removeItem(gkey);
@@ -1119,12 +1247,12 @@ function App({ user, recovery }) {
     await signOut();
   }
   async function removeAccount() {
-    if (!confirm('Opravdu smazat účet? Skupiny, kde jsi jediný, zmizí. Tohle nejde vrátit.')) return;
+    if (!(await ask('Opravdu smazat účet? Skupiny, kde jsi jediný, zmizí. Tohle nejde vrátit.'))) return;
     try {
       await deleteAccount();
       await logout(true);
     } catch {
-      alert('Účet se nepodařilo smazat. Zkus to prosím znovu.');
+      notify('Účet se nepodařilo smazat. Zkus to prosím znovu.');
     }
   }
 
@@ -1143,11 +1271,8 @@ function App({ user, recovery }) {
             onShare=${() => setSheet({ type: 'share' })}
             onAdd=${() => setSheet({ type: 'entry' })}
             onEntry=${(entry) => setSheet({ type: 'entry', entry })}
-            onQr=${(pay) => setSheet({ type: 'qr', pay })}
-            onPay=${(p) => saveEntry({
-              id: uid(), kind: 'transfer', title: 'Převod', amount: p.amount, currency: group.currency, rate: 1,
-              paidBy: p.from, mode: 'equal', parts: { [p.to]: 1 }, category: 'other', date: today(),
-            })} />`
+            onQr=${openQr}
+            onPay=${payDebt} />`
             : html`<div class="placeholder"><div class="big">🧾</div>
                 <p>${groups.length ? 'Vyber skupinu ze seznamu vlevo.' : 'Začni vytvořením skupiny nebo importem ze Settle Up.'}</p></div>`}
         </section>
@@ -1165,7 +1290,7 @@ function App({ user, recovery }) {
         <//>`}
       ${sheet?.type === 'qr' && group && html`
         <${Sheet} title="QR platba" onClose=${close}>
-          <${QrSheet} group=${group} pay=${sheet.pay} />
+          <${QrSheet} group=${group} pay=${sheet.pay} onPaid=${() => payDebt(sheet.pay)} />
         <//>`}
       ${sheet?.type === 'share' && group && html`
         <${Sheet} title="Sdílení skupiny" onClose=${close}>
@@ -1207,9 +1332,9 @@ function Root() {
   }, []);
 
   if (!boot) return html`<div class="empty">Načítám…</div>`;
-  if (syncEnabled && !sess) return html`<${AuthScreen} notice=${boot.error} />`;
+  if (syncEnabled && !sess) return html`<${AuthScreen} notice=${boot.error} /><${DialogHost} />`;
   const user = syncEnabled ? sess.user : null;
-  return html`<${App} key=${user?.id || 'local'} user=${user} recovery=${boot.type === 'recovery'} />`;
+  return html`<${App} key=${user?.id || 'local'} user=${user} recovery=${boot.type === 'recovery'} /><${DialogHost} />`;
 }
 
 render(html`<${Root} />`, document.getElementById('root'));

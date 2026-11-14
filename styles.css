@@ -138,7 +138,7 @@ input:focus-visible, select:focus-visible, button:focus-visible { outline: 2px s
 .two { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .amount-row { display: flex; gap: 10px; }
 .amount-row .amount { font-size: 30px; font-weight: 700; padding: 8px 14px; flex: 1; }
-.amount-row select { width: 96px; font-weight: 600; }
+
 .chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .chip { padding: 7px 11px; border-radius: 999px; background: var(--card); border: 1px solid var(--line); font-size: 14px; }
 .chip.on { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); font-weight: 600; }
@@ -233,3 +233,80 @@ a { color: var(--accent); }
   .p-entries { grid-row: span 2; }
   .panel-title { display: block; }
 }
+
+/* ---------- Vlastní nabídky, kalendář, okna a zaškrtávátka ---------- */
+* { scrollbar-width: thin; scrollbar-color: var(--line) transparent; }
+.select { position: relative; }
+.select-btn {
+  width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 11px 12px; min-height: 46px;
+}
+.select-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+.select-btn i { font-style: normal; color: var(--muted); font-size: 12px; }
+.select-val, .opt { display: flex; align-items: center; gap: 8px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.select-menu {
+  position: absolute; top: calc(100% + 6px); left: 0; min-width: 100%; z-index: 30;
+  background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 6px;
+  box-shadow: 0 12px 32px rgb(0 0 0 / 0.28); max-height: 260px; overflow-y: auto;
+}
+.select-menu.right { left: auto; right: 0; }
+.menu-item { display: flex; align-items: center; gap: 8px; width: 100%; padding: 9px 10px; border-radius: 9px; white-space: nowrap; }
+.menu-item:hover, .menu-item:focus-visible { background: var(--line); }
+.menu-item.on { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.cur-pick { width: 104px; flex-shrink: 0; }
+.cur-pick .select-btn { height: 100%; font-weight: 600; }
+
+.cal { width: 280px; max-height: none; padding: 10px; }
+.cal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; text-transform: capitalize; }
+.cal-nav { width: 32px; height: 32px; border-radius: 50%; background: var(--line); text-align: center; font-size: 18px; }
+.cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; text-align: center; }
+.cal-grid .dow { font-size: 12px; color: var(--muted); padding: 4px 0; }
+.cal-day { height: 34px; border-radius: 9px; text-align: center; font-variant-numeric: tabular-nums; }
+.cal-day:hover { background: var(--line); }
+.cal-day.today { outline: 1px solid var(--accent); outline-offset: -1px; }
+.cal-day.on { background: var(--accent); color: var(--on-accent); font-weight: 700; }
+
+.dialog-overlay { z-index: 40; align-items: center; padding: 20px; }
+.dialog { background: var(--card); border-radius: 20px; padding: 22px; width: 100%; max-width: 400px; box-shadow: 0 24px 60px rgb(0 0 0 / 0.4); }
+.dialog p { line-height: 1.5; }
+.dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
+.dialog-actions .btn { min-width: 104px; }
+
+input[type='checkbox'], input[type='radio'] {
+  appearance: none; -webkit-appearance: none; margin: 0; flex-shrink: 0; cursor: pointer;
+  width: 22px !important; height: 22px !important; display: inline-grid; place-content: center;
+  background: var(--card); border: 2px solid var(--muted); border-radius: 7px;
+}
+input[type='radio'] { border-radius: 50%; }
+input[type='checkbox']:checked, input[type='radio']:checked { background: var(--accent); border-color: var(--accent); }
+input[type='checkbox']:checked::after { content: '✓'; color: var(--on-accent); font-size: 14px; font-weight: 800; line-height: 1; }
+input[type='radio']:checked::after { content: ''; width: 8px; height: 8px; border-radius: 50%; background: var(--on-accent); }
+
+/* Vyrovnání: plátce | částka | příjemce v pevné mřížce, tlačítka pod tím na celou šířku */
+.pay { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: 12px 10px; padding: 14px; }
+.pay-row { display: contents; }
+.pay-who { flex-direction: column; }
+.pay-who.end { flex-direction: column-reverse; }
+.pay-mid { min-width: 96px; }
+.pay-actions { grid-column: 1 / -1; display: flex; gap: 8px; }
+.pay-actions .btn { flex: 1; padding: 9px 12px; }
+
+@media (min-width: 900px) {
+  .side .top { padding: 28px 20px 12px; }
+  .side main { padding: 4px 20px 32px; }
+  .panel-title { margin: 8px 4px 0; }
+}
+@media (min-width: 1200px) {
+  .panel .day:first-of-type { margin-top: 4px; }
+}
+
+/* Počítač: tlačítko pro přidání je v záhlaví skupiny, ne přes obsah. */
+@media (min-width: 900px) {
+  .fab {
+    top: 26px; bottom: auto; right: max(144px, calc((100vw - 1320px) / 2 + 144px));
+    height: 42px; border-radius: 21px; padding: 0 18px; font-size: 15px; box-shadow: none;
+  }
+  .main-pane main { padding-bottom: 48px; }
+  .group-top h1 { padding-right: 190px; }
+}
+.cur-pick .select { height: 100%; }
