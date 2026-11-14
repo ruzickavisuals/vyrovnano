@@ -41,7 +41,12 @@ export function guessCategory(text) {
   return 'other';
 }
 // Kategorie záznamu; kde chybí, odhadne se z názvu (platí i pro starší a importované výdaje).
-export const catOf = (e) => (e.category && e.category !== 'other' ? e.category : guessCategory(e.title));
+export function catOf(e) {
+  if (!e.category || e.category === 'other') return guessCategory(e.title);
+  // Starší importy řadily kávu pod „Pití“; kde název jasně mluví o kávě, opravíme to.
+  if (e.category === 'drinks' && guessCategory(e.title) === 'coffee') return 'coffee';
+  return e.category;
+}
 export const cat = (id) => CATS.find((c) => c.id === id) || CATS[CATS.length - 1];
 
 export const CURRENCIES = ['CZK', 'EUR', 'USD', 'GBP', 'PLN', 'HUF', 'CHF'];

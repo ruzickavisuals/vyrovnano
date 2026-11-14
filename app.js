@@ -5,7 +5,7 @@ import {
 } from './logic.js';
 import {
   syncEnabled, shared, canon, merge, sanitize, sig, listRemote, joinRemote, leaveRemote,
-  resetInvite, kickRemote, deleteAccount, groupUserIds, syncGroup, listBackups, getBackup,
+  resetInvite, kickRemote, deleteAccount, groupUserIds, syncGroup, listBackups, getBackup, isAdmin,
 } from './sync.js';
 import {
   getSession, onAuthChange, signUp, signIn, signInWithGoogle, sendPasswordReset,
@@ -100,7 +100,7 @@ function pickImage() {
 
 /* ---------- Domovská obrazovka ---------- */
 
-function Home({ groups, profile, account, onOpen, onNew, onProfile, onImport }) {
+function Home({ groups, profile, account, activeId, onOpen, onNew, onProfile, onImport }) {
   return html`
     <header class="top row">
       <div class="grow">
@@ -122,7 +122,7 @@ function Home({ groups, profile, account, onOpen, onNew, onProfile, onImport }) 
         const my = balances(g)[g.me] || 0;
         const { total } = stats(g);
         return html`
-          <button class="card group-card" onClick=${() => onOpen(g.id)}>
+          <button class=${'card group-card' + (g.id === activeId ? ' active' : '')} onClick=${() => onOpen(g.id)}>
             <span class="avatar">${g.emoji}</span>
             <span class="grow">
               <strong>${g.name}</strong>
@@ -153,27 +153,34 @@ function GroupView({ group, onBack, onEdit, onShare, onEntry, onAdd, onPay, onQr
   return html`
     <header class="top group-top">
       <div class="row">
-        <button class="icon-btn" onClick=${onBack} aria-label="Zpět">‹</button>
+        <button class="icon-btn back" onClick=${onBack} aria-label="Zpět">‹</button>
         <h1 class="grow">${group.emoji} ${group.name}</h1>
         <button class="icon-btn" onClick=${onShare} aria-label="Sdílet skupinu">🔗</button>
         <button class="icon-btn" onClick=${onEdit} aria-label="Upravit skupinu">⚙︎</button>
       </div>
       <div class="hero">
         <div>
-          <small>Celkem utraceno</small>
-          <strong>${fmt(st.total, cur)}</strong>
+          <small>${st.total < 0 ? 'Čistý příjem skupiny' : 'Celkem utraceno'}</small>
+          <strong>${fmt(Math.abs(st.total), cur)}</strong>
         </div>
         <div class="right">
           <small>${my > 0 ? 'Dostaneš zpět' : my < 0 ? 'Dlužíš' : 'Tvůj stav'}</small>
           <strong class=${my > 0 ? 'pos' : my < 0 ? 'neg' : ''}>${my ? fmt(Math.abs(my), cur) : 'Vyrovnáno ✓'}</strong>
         </div>
       </div>
-      <${Seg} value=${tab} onChange=${setTab} options=${[['entries', 'Výdaje'], ['debts', 'Dluhy'], ['stats', 'Přehled']]} />
+      <div class="tabs"><${Seg} value=${tab} onChange=${setTab} options=${[['entries', 'Výdaje'], ['debts', 'Dluhy'], ['stats', 'Přehled']]} /></div>
     </header>
-    <main class="with-fab">
-      ${tab === 'entries' && html`<${Entries} group=${group} onEntry=${onEntry} />`}
-      ${tab === 'debts' && html`<${Debts} group=${group} bal=${bal} onPay=${onPay} onQr=${onQr} />`}
-      ${tab === 'stats' && html`<${Stats} group=${group} st=${st} />`}
+    <main class="with-fab panels">
+      <section class=${'panel p-entries' + (tab === 'entries' ? ' on' : '')}>
+        <h2 class="panel-title">Výdaje</h2>
+        <${Entries} group=${group} onEntry=${onEntry} />
+      </section>
+      <section class=${'panel p-debts' + (tab === 'debts' ? ' on' : '')}>
+        <${Debts} group=${group} bal=${bal} onPay=${onPay} onQr=${onQr} />
+      </section>
+      <section class=${'panel p-stats' + (tab === 'stats' ? ' on' : '')}>
+        <${Stats} group=${group} st=${st} />
+      </section>
     </main>
     <button class="fab" onClick=${onAdd} aria-label="Přidat výdaj">+</button>
   `;
@@ -476,13 +483,15 @@ function EntryForm({ group, entry, onSave, onDelete }) {
 
 /* ---------- Formulář skupiny ---------- */
 
-function GroupForm({ group, profile, deleteLabel, onSave, onDelete, onBackups }) {
+function GroupForm({ group, profile, userId, admin, deleteLabel, onSave, onDelete, onBackups }) {
   const [name, setName] = useState(group?.name || '');
   const [emoji, setEmoji] = useState(group?.emoji || '👥');
   const [currency, setCurrency] = useState(group?.currency || 'CZK');
   const [members, setMembers] = useState(group?.members || [{ id: uid(), name: profile.name || 'Já', avatar: profile.avatar }, { id: uid(), name: '' }]);
   const [me, setMe] = useState(group?.me || members[0].id);
   const used = new Set((group?.entries || []).flatMap((e) => [e.paidBy, ...Object.keys(e.parts)]));
+  // Číslo účtu smí měnit jen ten, komu člen patří, nebo správce aplikace (totéž hlídá server).
+  const mayIban = (m) => !userId || admin || m.id === me || m.uid === userId;
   const upd = (id, patch) => setMembers((ms) => ms.map((m) => (m.id === id ? { ...m, ...patch } : m)));
 
   const valid = members.filter((m) => m.name.trim());
@@ -525,12 +534,16 @@ function GroupForm({ group, profile, deleteLabel, onSave, onDelete, onBackups })
                 <${Avatar} m=${m} size=${36} />
               </button>
               <input class="grow" placeholder="Jméno" maxlength="60" value=${m.name} onInput=${(e) => upd(m.id, { name: e.target.value })} />
-              <label class="me-pick"><input type="radio" name="me" checked=${me === m.id} onChange=${() => setMe(m.id)} /> já</label>
+              ${m.uid && m.uid !== userId
+                ? html`<em class="tag" title="Tento člen je propojený s jiným účtem">má účet</em>`
+                : html`<label class="me-pick"><input type="radio" name="me" checked=${me === m.id} onChange=${() => setMe(m.id)} /> já</label>`}
               <button type="button" class="icon-btn" disabled=${used.has(m.id) || members.length <= 2}
                 title=${used.has(m.id) ? 'Má výdaje, nejde odebrat' : 'Odebrat'}
                 onClick=${() => setMembers((ms) => ms.filter((x) => x.id !== m.id))}>✕</button>
             </div>
-            <input class="iban" placeholder="Číslo účtu pro QR platbu (nepovinné)" value=${m.iban || ''} onInput=${(e) => upd(m.id, { iban: e.target.value })} />
+            <input class="iban" maxlength="50" value=${m.iban || ''} onInput=${(e) => upd(m.id, { iban: e.target.value })}
+              disabled=${!mayIban(m)}
+              placeholder=${mayIban(m) ? 'Číslo účtu pro QR platbu (nepovinné)' : 'Číslo účtu si vyplní člen sám'} />
             ${m.iban && !toIban(m.iban) ? html`<small class="neg">Zadej ve tvaru 123456789/0800 nebo IBAN.</small>` : ''}
           </div>
         `)}
@@ -627,17 +640,27 @@ function ShareSheet({ group, user, syncState, onReset, onKick }) {
   `;
 }
 
-function WhoSheet({ group, profile, onPick }) {
+// Jména se porovnávají bez ohledu na velikost písmen; stačí shoda jména nebo příjmení.
+const normName = (s) => String(s || '').trim().toLowerCase();
+const sameName = (a, b) => {
+  const x = normName(a), y = normName(b);
+  return !!x && !!y && (x === y || x.split(/\s+/).some((w) => w.length > 2 && y.split(/\s+/).includes(w)));
+};
+
+function WhoSheet({ group, profile, known, onPick }) {
   const [name, setName] = useState(profile.name);
-  const free = group.members.filter((m) => !m.uid);
+  const likely = (m) => known.some((k) => sameName(k, m.name));
+  // Nabízíme jen členy, které si ještě nikdo nepřivlastnil; pravděpodobná shoda je nahoře.
+  const free = group.members.filter((m) => !m.uid).sort((a, b) => likely(b) - likely(a));
   return html`
     <div class="form">
-      <p>Vyber, kdo ze skupiny jsi, ať ti aplikace ukazuje tvoje dluhy.</p>
+      <p>Vyber, kdo ze skupiny jsi. Tvůj účet se propojí s tímto členem a s jeho dosavadními výdaji.</p>
       ${free.length > 0 && html`
         <div class="card list">
           ${free.map((m) => html`
             <button class="item" onClick=${() => onPick(m.id)}>
               <${Avatar} m=${m} size=${34} /><strong class="grow">${m.name}</strong>
+              ${likely(m) && html`<em class="tag">nejspíš ty</em>`}
             </button>
           `)}
         </div>`}
@@ -728,7 +751,7 @@ function PasswordForm({ label = 'Změnit heslo', onDone }) {
   `;
 }
 
-function ProfileSheet({ profile, user, onSave, onLogout, onDeleteAccount }) {
+function ProfileSheet({ profile, user, admin, onSave, onLogout, onDeleteAccount }) {
   const [name, setName] = useState(profile.name);
   const [avatar, setAvatar] = useState(profile.avatar);
   return html`
@@ -749,7 +772,7 @@ function ProfileSheet({ profile, user, onSave, onLogout, onDeleteAccount }) {
 
       ${user && html`
         <hr />
-        <div class="field"><span>Účet</span><div>${user.email}${user.provider !== 'email' ? ` · přihlášení přes ${user.provider === 'google' ? 'Google' : user.provider}` : ''}</div></div>
+        <div class="field"><span>Účet${admin ? ' · správce aplikace' : ''}</span><div>${user.email}${user.provider !== 'email' ? ` · přihlášení přes ${user.provider === 'google' ? 'Google' : user.provider}` : ''}</div></div>
         ${user.provider === 'email' && html`<${PasswordForm} />`}
         <button class="btn wide" onClick=${onLogout}>Odhlásit se</button>
         <button class="btn danger wide" onClick=${onDeleteAccount}>Smazat účet</button>
@@ -834,6 +857,10 @@ function App({ user, recovery }) {
   const [gid, setGid] = useState(null);
   const [sheet, setSheet] = useState(recovery ? { type: 'newpw' } : null);
   const [syncState, setSyncState] = useState('');
+  const [admin, setAdmin] = useState(false);
+  useEffect(() => {
+    if (user) isAdmin().then((v) => setAdmin(v === true)).catch(() => {});
+  }, []);
   const ref = useRef(groups);
   ref.current = groups;
   const busy = useRef({});
@@ -847,7 +874,9 @@ function App({ user, recovery }) {
   const close = () => setSheet(null);
   // S účtem se „kdo jsem já“ neukládá do zařízení, ale pozná se podle účtu propojeného se členem.
   const withMe = (g) => (user ? { ...g, me: g.members.find((m) => m.uid === user.id)?.id ?? null } : g);
-  const prof = { ...profile, name: profile.name || (user ? user.email.split('@')[0] : '') };
+  const prof = { ...profile, name: profile.name || (user ? user.name || user.email.split('@')[0] : '') };
+  // Jména, pod kterými už tenhle účet vystupuje v jiných skupinách – pro návrh v „Kdo jsi?“.
+  const known = [prof.name, ...groups.flatMap((g) => g.members.filter((m) => user && m.uid === user.id).map((m) => m.name))];
 
   /* --- synchronizace --- */
   async function sync(id) {
@@ -978,6 +1007,8 @@ function App({ user, recovery }) {
   const needsWho = group && !group.members.some((m) => m.id === group.me);
   function pickWho(id, newName) {
     const mine = { uid: user?.id };
+    const taken = id && group.members.find((m) => m.id === id)?.uid;
+    if (taken && taken !== user?.id) return alert('Tohoto člena si mezitím vybral někdo jiný. Vyber prosím jiného.');
     if (id) {
       putGroup({ ...group, mu: Date.now(), me: id,
         members: group.members.map((m) => (m.id === id ? { ...m, ...mine, avatar: m.avatar || profile.avatar } : m)) });
@@ -1007,6 +1038,8 @@ function App({ user, recovery }) {
       if (!file) return;
       try {
         const { group: g, imported, skipped } = parseSettleUp(decodeText(await file.arrayBuffer()), file.name);
+        if (ref.current.some((x) => x.name === g.name) &&
+            !confirm(`Skupinu „${g.name}“ už máš. Importovat ji znovu jako další skupinu?`)) return;
         const id = user ? crypto.randomUUID() : uid();
         setGroups((gs) => [...gs, { ...g, id, mu: Date.now() }]);
         setGid(id);
@@ -1096,9 +1129,15 @@ function App({ user, recovery }) {
   }
 
   return html`
-    <div class="app">
-      ${group
-        ? html`<${GroupView} key=${group.id} group=${group}
+    <div class="app wide">
+      <div class="layout">
+        <aside class=${'side' + (group ? ' has-group' : '')}>
+          <${Home} groups=${groups} profile=${prof} account=${!!user} activeId=${gid} onOpen=${setGid}
+            onNew=${() => setSheet({ type: 'group' })} onProfile=${() => setSheet({ type: 'profile' })} onImport=${importSettleUp} />
+        </aside>
+        <section class="main-pane">
+          ${group
+            ? html`<${GroupView} key=${group.id} group=${group}
             onBack=${() => setGid(null)}
             onEdit=${() => setSheet({ type: 'group', group })}
             onShare=${() => setSheet({ type: 'share' })}
@@ -1109,12 +1148,14 @@ function App({ user, recovery }) {
               id: uid(), kind: 'transfer', title: 'Převod', amount: p.amount, currency: group.currency, rate: 1,
               paidBy: p.from, mode: 'equal', parts: { [p.to]: 1 }, category: 'other', date: today(),
             })} />`
-        : html`<${Home} groups=${groups} profile=${prof} account=${!!user} onOpen=${setGid}
-            onNew=${() => setSheet({ type: 'group' })} onProfile=${() => setSheet({ type: 'profile' })} onImport=${importSettleUp} />`}
+            : html`<div class="placeholder"><div class="big">🧾</div>
+                <p>${groups.length ? 'Vyber skupinu ze seznamu vlevo.' : 'Začni vytvořením skupiny nebo importem ze Settle Up.'}</p></div>`}
+        </section>
+      </div>
 
       ${sheet?.type === 'group' && html`
         <${Sheet} title=${sheet.group ? 'Upravit skupinu' : 'Nová skupina'} onClose=${close}>
-          <${GroupForm} group=${sheet.group} profile=${prof} onSave=${saveGroupForm}
+          <${GroupForm} group=${sheet.group} profile=${prof} userId=${user?.id} admin=${admin} onSave=${saveGroupForm}
             deleteLabel=${!user ? 'Smazat skupinu' : sheet.group?.members.some((m) => m.uid && m.uid !== user.id) ? 'Opustit skupinu' : 'Smazat skupinu'}
             onDelete=${() => removeGroup(sheet.group)} onBackups=${() => setSheet({ type: 'backups' })} />
         <//>`}
@@ -1136,7 +1177,7 @@ function App({ user, recovery }) {
         <//>`}
       ${sheet?.type === 'profile' && html`
         <${Sheet} title="Můj profil" onClose=${close}>
-          <${ProfileSheet} profile=${profile} user=${user} onSave=${saveProfile} onLogout=${() => logout()} onDeleteAccount=${removeAccount} />
+          <${ProfileSheet} profile=${profile} user=${user} admin=${admin} onSave=${saveProfile} onLogout=${() => logout()} onDeleteAccount=${removeAccount} />
         <//>`}
       ${sheet?.type === 'newpw' && html`
         <${Sheet} title="Nastav si nové heslo" onClose=${close}>
@@ -1144,7 +1185,7 @@ function App({ user, recovery }) {
         <//>`}
       ${needsWho && !sheet && html`
         <${Sheet} title="Kdo jsi?" onClose=${() => setGid(null)}>
-          <${WhoSheet} group=${group} profile=${prof} onPick=${pickWho} />
+          <${WhoSheet} group=${group} profile=${prof} known=${known} onPick=${pickWho} />
         <//>`}
     </div>
   `;

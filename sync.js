@@ -125,6 +125,7 @@ export const leaveRemote = (gid) => rpc('leave_group', { p_gid: gid });
 export const resetInvite = (gid) => rpc('reset_invite', { p_gid: gid });
 export const kickRemote = (gid, userId) => rpc('kick_member', { p_gid: gid, p_user: userId });
 export const deleteAccount = () => rpc('delete_account');
+export const isAdmin = () => rpc('is_admin');
 export async function groupUserIds(gid) {
   const rows = await rpc('group_user_ids', { p_gid: gid });
   return (Array.isArray(rows) ? rows : []).map(okUuid).filter(Boolean);

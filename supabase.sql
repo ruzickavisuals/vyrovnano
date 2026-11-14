@@ -195,6 +195,125 @@ begin
 end;
 $$;
 
+-- ===== Správce aplikace a ochrana čísel účtů =====
+-- Správce se přidává ručně v SQL Editoru (záměrně ne z aplikace):
+--   insert into public.app_admins (user_id) select id from auth.users where email = 'váš e-mail';
+create table if not exists public.app_admins (
+  user_id uuid primary key references auth.users (id) on delete cascade
+);
+alter table public.app_admins enable row level security;
+revoke all on public.app_admins from anon, authenticated;
+
+create or replace function public.is_admin()
+returns boolean
+language sql stable security definer set search_path = ''
+as $$
+  select exists (select 1 from public.app_admins a where a.user_id = auth.uid());
+$$;
+revoke execute on function public.is_admin() from public, anon;
+grant execute on function public.is_admin() to authenticated;
+
+-- Hlídá dvě věci u členů skupiny při každém uložení:
+--  1) propojení člena s účtem (uid): běžný uživatel smí jen přivlastnit volného člena sobě
+--     nebo své propojení zrušit; cizí propojení mění jen vlastník skupiny nebo správce;
+--  2) číslo účtu (iban): mění ho jen ten, komu člen patří, nebo správce.
+-- Nedovolená změna se neodmítá, ale tiše vrátí na původní hodnotu, aby se zařízení nezasekla.
+create or replace function public.protect_members(p_old jsonb, p_new jsonb, p_me uuid, p_can_uid boolean, p_can_iban boolean)
+returns jsonb
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  res jsonb := '[]'::jsonb;
+  m jsonb;
+  o jsonb;
+  fixed jsonb;
+  changed boolean := false;
+  mine text := p_me::text;
+begin
+  if (p_can_uid and p_can_iban) or jsonb_typeof(p_new -> 'members') is distinct from 'array' then
+    return p_new;
+  end if;
+  for m in select t.val from jsonb_array_elements(p_new -> 'members') as t(val) loop
+    o := null;
+    if jsonb_typeof(p_old -> 'members') = 'array' then
+      select t.val into o from jsonb_array_elements(p_old -> 'members') as t(val)
+        where t.val ->> 'id' = m ->> 'id' limit 1;
+    end if;
+    fixed := m;
+
+    if not p_can_uid and coalesce(m ->> 'uid', '') <> coalesce(o ->> 'uid', '') then
+      if not ((coalesce(o ->> 'uid', '') = '' and m ->> 'uid' = mine)
+           or (o ->> 'uid' = mine and coalesce(m ->> 'uid', '') = '')) then
+        fixed := fixed - 'uid';
+        if coalesce(o ->> 'uid', '') <> '' then fixed := fixed || jsonb_build_object('uid', o -> 'uid'); end if;
+        changed := true;
+      end if;
+    end if;
+
+    if not p_can_iban and coalesce(m ->> 'iban', '') <> coalesce(o ->> 'iban', '')
+       and coalesce(fixed ->> 'uid', '') <> mine then
+      fixed := fixed - 'iban';
+      if coalesce(o ->> 'iban', '') <> '' then fixed := fixed || jsonb_build_object('iban', o -> 'iban'); end if;
+      changed := true;
+    end if;
+
+    res := res || jsonb_build_array(fixed);
+  end loop;
+
+  if changed then
+    p_new := jsonb_set(p_new, '{members}', res);
+    -- Novější časové razítko zajistí, že opravenou verzi převezmou všechna zařízení.
+    p_new := jsonb_set(p_new, '{mu}', to_jsonb(greatest(
+      case when jsonb_typeof(p_new -> 'mu') = 'number' then (p_new ->> 'mu')::numeric::bigint else 0 end + 1,
+      floor(extract(epoch from clock_timestamp()) * 1000)::bigint)));
+  end if;
+  return p_new;
+end;
+$$;
+revoke execute on function public.protect_members(jsonb, jsonb, uuid, boolean, boolean) from public, anon, authenticated;
+
+create or replace function public.save_group(p_gid uuid, p_data jsonb, p_expected integer)
+returns integer
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  v integer;
+  me uuid := auth.uid();
+  adm boolean;
+  old_data jsonb;
+  old_owner uuid;
+begin
+  if me is null then raise exception 'not signed in'; end if;
+  if pg_column_size(p_data) > 1000000 then raise exception 'group too large'; end if;
+  adm := exists (select 1 from public.app_admins a where a.user_id = me);
+
+  if p_expected = 0 then
+    if (select count(*) from public.groups g where g.owner = me) >= 200 then
+      raise exception 'too many groups';
+    end if;
+    insert into public.groups (id, data, owner)
+      values (p_gid, public.protect_members(null, p_data, me, true, adm), me)
+      on conflict (id) do nothing returning version into v;
+    if v is null then return -1; end if;
+    insert into public.group_members (group_id, user_id) values (p_gid, me);
+    return v;
+  end if;
+
+  if not exists (select 1 from public.group_members m where m.group_id = p_gid and m.user_id = me) then
+    raise exception 'forbidden';
+  end if;
+  select g.data, g.owner into old_data, old_owner from public.groups g where g.id = p_gid for update;
+  update public.groups g
+    set data = public.protect_members(old_data, p_data, me, adm or coalesce(old_owner = me, false), adm),
+        version = g.version + 1, updated_at = now()
+    where g.id = p_gid and g.version = p_expected
+    returning g.version into v;
+  return coalesce(v, -1);
+end;
+$$;
+revoke execute on function public.save_group(uuid, jsonb, integer) from public, anon;
+grant execute on function public.save_group(uuid, jsonb, integer) to authenticated;
+
 -- ===== Zálohy =====
 -- Každou hodinu se uloží kopie každé skupiny, která se od poslední zálohy změnila.
 -- Uchovává se posledních 48 verzí na skupinu; starší se mažou.

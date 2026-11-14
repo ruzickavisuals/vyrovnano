@@ -59,7 +59,11 @@ async function call(path, { method = 'POST', body, token } = {}) {
   return j;
 }
 
-const pickUser = (u) => ({ id: u.id, email: u.email || '', provider: u.app_metadata?.provider || 'email' });
+const pickUser = (u) => ({
+  id: u.id, email: u.email || '', provider: u.app_metadata?.provider || 'email',
+  // Jméno z Google účtu (pokud je) použijeme jako výchozí jméno v profilu.
+  name: String(u.user_metadata?.full_name || u.user_metadata?.name || '').slice(0, 60),
+});
 function store(j) {
   set({
     access_token: j.access_token,

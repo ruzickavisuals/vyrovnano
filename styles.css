@@ -188,3 +188,48 @@ a { color: var(--accent); }
 .pay-mid { display: flex; flex-direction: column; align-items: center; flex-shrink: 0; line-height: 1.2; }
 .pay-mid .arrow { color: var(--muted); font-size: 18px; }
 .pay-actions { display: flex; justify-content: flex-end; gap: 8px; }
+
+/* ---------- Rozložení: telefon vs. počítač ---------- */
+.panel { display: none; flex-direction: column; gap: 12px; }
+.panel.on { display: flex; }
+.panel-title { display: none; font-size: 18px; margin: 8px 4px 0; }
+.placeholder { display: none; }
+.placeholder .big { font-size: 56px; }
+
+@media (max-width: 899px) {
+  .side.has-group { display: none; }
+}
+
+/* Počítač: seznam skupin vlevo, vybraná skupina vpravo, okna uprostřed obrazovky. */
+@media (min-width: 900px) {
+  .app.wide { max-width: 1320px; }
+  .layout { display: grid; grid-template-columns: 360px minmax(0, 1fr); min-height: 100dvh; }
+  .side { position: sticky; top: 0; height: 100dvh; overflow-y: auto; border-right: 1px solid var(--line); }
+  .main-pane { min-width: 0; }
+  .placeholder { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; height: 100dvh; color: var(--muted); text-align: center; }
+  .group-card.active { outline: 2px solid var(--accent); outline-offset: -2px; }
+  .group-top { padding: 28px 32px 12px; }
+  .group-top .back { display: none; }
+  .group-top h1 { font-size: 26px; }
+  .hero { padding: 18px 22px; }
+  .hero strong { font-size: 28px; }
+  .tabs { max-width: 420px; }
+  .main-pane main { padding: 4px 32px 110px; }
+  .fab {
+    left: auto; right: max(32px, calc((100vw - 1320px) / 2 + 32px)); margin: 0;
+    width: auto; height: 54px; border-radius: 27px; padding: 0 24px; font-size: 16px; font-weight: 700;
+  }
+  .fab::after { content: ' Přidat záznam'; }
+  .overlay { align-items: center; padding: 24px; }
+  .sheet { border-radius: 22px; max-width: 580px; max-height: 88dvh; box-shadow: 0 24px 60px rgb(0 0 0 / 0.35); }
+  .auth { padding-top: 8vh; }
+}
+
+/* Široká obrazovka: výdaje, dluhy a přehled vedle sebe místo záložek. */
+@media (min-width: 1200px) {
+  .tabs { display: none; }
+  .panels { display: grid !important; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 4px 32px; align-items: start; }
+  .panel { display: flex; }
+  .p-entries { grid-row: span 2; }
+  .panel-title { display: block; }
+}
