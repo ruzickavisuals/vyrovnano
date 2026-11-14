@@ -20,7 +20,7 @@ async function rpc(fn, body = {}) {
 
 // Část skupiny, která se sdílí se členy.
 export const shared = (g) => ({
-  name: g.name, emoji: g.emoji, currency: g.currency, members: g.members,
+  name: g.name, emoji: g.emoji, color: g.color, currency: g.currency, members: g.members,
   entries: g.entries, dead: g.dead || {}, mu: g.mu || 0,
 });
 
@@ -56,7 +56,7 @@ export function merge(a, b) {
   for (const m of other.members) {
     if (used.has(m.id) && !members.some((x) => x.id === m.id)) members.push(m);
   }
-  return { name: meta.name, emoji: meta.emoji, currency: meta.currency, members, entries, dead, mu: meta.mu || 0 };
+  return { name: meta.name, emoji: meta.emoji, color: meta.color, currency: meta.currency, members, entries, dead, mu: meta.mu || 0 };
 }
 
 // Data ze serveru mohl upravit kterýkoli člen skupiny, proto jim nevěříme naslepo:
@@ -66,6 +66,7 @@ const okId = (v) => typeof v === 'string' && /^[A-Za-z0-9][A-Za-z0-9-]{0,39}$/.t
 const num = (v) => (Number.isFinite(v) ? v : 0);
 const cur = (v) => (/^[A-Z]{3}$/.test(v) ? v : 'CZK');
 const okUuid = (v) => (typeof v === 'string' && /^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(v) ? v : undefined);
+const GROUP_COLORS = ['teal', 'blue', 'indigo', 'violet', 'pink', 'red', 'orange', 'amber', 'green', 'slate'];
 const okAvatar = (v) =>
   typeof v === 'string' && v.length < 60000 && /^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(v) ? v : undefined;
 
@@ -98,7 +99,8 @@ export function sanitize(d) {
   if (d.dead && typeof d.dead === 'object') {
     for (const [k, v] of Object.entries(d.dead).slice(0, 5000)) if (okId(k) && Number.isFinite(v)) dead[k] = v;
   }
-  return { name: str(d.name, 80) || 'Skupina', emoji: str(d.emoji, 16) || '👥', currency: cur(d.currency), members, entries, dead, mu: num(d.mu) };
+  return { name: str(d.name, 80) || 'Skupina', emoji: str(d.emoji, 16) || '👥',
+    color: GROUP_COLORS.includes(d.color) ? d.color : undefined, currency: cur(d.currency), members, entries, dead, mu: num(d.mu) };
 }
 
 // Otisk sdílené části skupiny – podle něj poznáme, jestli je co synchronizovat.

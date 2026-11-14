@@ -352,3 +352,51 @@ input.emoji-input { width: 104px !important; padding: 5px 10px !important; borde
   .layout { grid-template-columns: 400px minmax(0, 1fr); }
 }
 .group-card strong { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+
+/* ---------- Barvy skupin a zvýraznění hlavních boxů ---------- */
+.gc-teal { --g: #0f766e; } .gc-blue { --g: #2563eb; } .gc-indigo { --g: #4f46e5; } .gc-violet { --g: #7c3aed; }
+.gc-pink { --g: #db2777; } .gc-red { --g: #dc2626; } .gc-orange { --g: #ea580c; } .gc-amber { --g: #b45309; }
+.gc-green { --g: #15803d; } .gc-slate { --g: #475569; }
+@media (prefers-color-scheme: dark) {
+  .gc-teal { --g: #2dd4bf; } .gc-blue { --g: #60a5fa; } .gc-indigo { --g: #818cf8; } .gc-violet { --g: #a78bfa; }
+  .gc-pink { --g: #f472b6; } .gc-red { --g: #f87171; } .gc-orange { --g: #fb923c; } .gc-amber { --g: #fbbf24; }
+  .gc-green { --g: #4ade80; } .gc-slate { --g: #94a3b8; }
+}
+
+/* Karta skupiny v seznamu: barevný proužek, jemný přechod a podbarvená ikona. */
+.group-row .group-card {
+  border-left: 4px solid var(--g);
+  background: linear-gradient(115deg, color-mix(in srgb, var(--g) 13%, var(--card)), var(--card) 58%);
+}
+.group-row .avatar { background: color-mix(in srgb, var(--g) 22%, var(--card)); }
+.group-row .group-card.active { outline-color: var(--g); }
+
+/* Uvnitř skupiny přebírá barvu skupiny vše, co nese akcent: tlačítka, pruhy, štítky. */
+.main-pane { --accent: var(--g); --accent-soft: color-mix(in srgb, var(--g) 16%, var(--card)); }
+.hero {
+  background: linear-gradient(120deg, color-mix(in srgb, var(--accent) 20%, var(--card)), var(--card) 68%);
+  border: 1px solid color-mix(in srgb, var(--accent) 26%, transparent);
+}
+.panel-title { align-items: center; gap: 10px; }
+.panel-title::before { content: ''; width: 4px; height: 18px; border-radius: 2px; background: var(--accent); }
+@media (min-width: 1200px) { .panel-title { display: flex; } }
+.main-pane .day { display: flex; align-items: center; gap: 8px; }
+.main-pane .card { border: 1px solid color-mix(in srgb, var(--line) 80%, transparent); }
+.pay-mid .arrow { color: var(--accent); }
+
+/* Výběr barvy */
+.swatches { display: flex; flex-wrap: wrap; gap: 10px; }
+.swatch { width: 32px; height: 32px; border-radius: 50%; background: var(--g); border: 3px solid var(--bg); box-shadow: 0 0 0 1px var(--line); }
+.swatch.on { box-shadow: 0 0 0 2px var(--g); }
+
+/* Výběr emoji */
+.emoji-now { font-size: 22px; line-height: 1; }
+.emoji-menu { max-height: none; overflow: visible; padding: 10px; }
+input.emoji-search { margin-bottom: 8px; padding: 9px 12px !important; }
+.emoji-scroll { max-height: 320px; overflow-y: auto; }
+.emoji-cat { font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; padding: 8px 4px 4px; }
+.emoji-grid { display: grid; grid-template-columns: repeat(8, 1fr); gap: 2px; }
+.emoji-cell { aspect-ratio: 1; border-radius: 9px; font-size: 22px; display: grid; place-items: center; line-height: 1; }
+.emoji-cell:hover, .emoji-cell:focus-visible { background: var(--line); }
+.emoji-cell.on { background: var(--accent-soft); box-shadow: inset 0 0 0 1.5px var(--accent); }
+.emoji-none { padding: 16px 4px; font-size: 14px; }

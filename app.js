@@ -13,6 +13,7 @@ import {
 } from './auth.js';
 import { GOOGLE_LOGIN } from './config.js';
 import { parseSettleUp, decodeText } from './import.js';
+import { EMOJI, COLORS } from './emoji.js';
 
 const KEY = 'vyrovnano.v1';
 const JKEY = 'vyrovnano.join';
@@ -33,7 +34,6 @@ function loadProfile(key) {
   return { name: '' };
 }
 
-const EMOJIS = ['👥', '🏠', '💼', '✈️', '🏖️', '🏔️', '🍻', '🚗', '🎁'];
 // První emoji z napsaného textu (i složené, např. vlajky nebo rodina).
 function firstEmoji(text) {
   const parts = typeof Intl.Segmenter === 'function'
@@ -241,9 +241,50 @@ function pickImage() {
   });
 }
 
+// Výběr ikony skupiny: malé okno s nabídkou emoji a hledáním podle českých slov.
+const fold = (t) => String(t || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+function EmojiPicker({ value, onChange }) {
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState('');
+  const [pos, setPos] = useState('');
+  const ref = useRef();
+  useDismiss(ref, open, () => setOpen(false));
+  const query = fold(q).trim();
+  const typed = firstEmoji(q); // emoji vložené do hledání z klávesnice
+  const cats = EMOJI
+    .map(([name, items]) => [name, items.filter(([, k]) => !query || k.includes(query) || fold(name).includes(query))])
+    .filter(([, items]) => items.length);
+  const pick = (e) => { onChange(e); setOpen(false); };
+  return html`
+    <div class="select" ref=${ref} onClick=${(e) => e.preventDefault()}>
+      <button type="button" class="select-btn emoji-btn" aria-label="Vybrat ikonu skupiny" aria-expanded=${open}
+        onClick=${() => { if (!open) { setQ(''); setPos(popupStyle(ref.current, 340, 396)); } setOpen(!open); }}>
+        <span class="select-val"><span class="emoji-now">${value}</span>Změnit ikonu</span><i aria-hidden="true">▾</i>
+      </button>
+      ${open && html`
+        <div class="select-menu emoji-menu" style=${pos}>
+          <input class="emoji-search" placeholder="Hledat: pivo, hory, auto…" aria-label="Hledat emoji" value=${q}
+            onInput=${(e) => setQ(e.target.value)} />
+          <div class="emoji-scroll">
+            ${typed && html`
+              <div class="emoji-cat">Vložené z klávesnice</div>
+              <div class="emoji-grid"><button type="button" class="emoji-cell" onClick=${() => pick(typed)}>${typed}</button></div>`}
+            ${cats.map(([name, items]) => html`
+              <div class="emoji-cat">${name}</div>
+              <div class="emoji-grid">
+                ${items.map(([e, k]) => html`
+                  <button type="button" class=${'emoji-cell' + (e === value ? ' on' : '')} title=${k} onClick=${() => pick(e)}>${e}</button>`)}
+              </div>`)}
+            ${!cats.length && !typed && html`<p class="muted emoji-none">Nic jsem nenašel. Emoji sem můžeš i vložit z klávesnice.</p>`}
+          </div>
+        </div>`}
+    </div>
+  `;
+}
+
 /* ---------- Domovská obrazovka ---------- */
 
-function Home({ groups, profile, account, activeId, onOpen, onNew, onProfile, onImport, onReorder, onSortByName }) {
+function Home({ groups, profile, account, activeId, onOpen, onNew, onProfile, onReorder, onSortByName }) {
   // Přetažení skupiny za úchyt: funguje myší i prstem. Pořadí se mění průběžně podle toho,
   // nad kterou kartou se ukazatel právě nachází.
   const [drag, setDrag] = useState(null);
@@ -292,7 +333,7 @@ function Home({ groups, profile, account, activeId, onOpen, onNew, onProfile, on
         const my = balances(g)[g.me] || 0;
         const { total } = stats(g);
         return html`
-          <div class=${'group-row' + (drag === g.id ? ' dragging' : '')} key=${g.id}>
+          <div class=${'group-row gc-' + (g.color || 'teal') + (drag === g.id ? ' dragging' : '')} key=${g.id}>
           ${groups.length > 1 && html`
             <span class="grip" role="button" aria-label=${'Přesunout skupinu ' + g.name} title="Přetáhni pro změnu pořadí"
               onPointerDown=${(e) => down(e, g.id)} onPointerMove=${move} onPointerUp=${up} onPointerCancel=${up}>⠿</span>`}
@@ -312,7 +353,6 @@ function Home({ groups, profile, account, activeId, onOpen, onNew, onProfile, on
       })}
       </div>
       <button class="btn primary wide" onClick=${onNew}>+ Nová skupina</button>
-      <button class="btn wide" onClick=${onImport}>Importovat ze Settle Up</button>
     </main>
   `;
 }
@@ -682,6 +722,7 @@ function EntryForm({ group, entry, onSave, onDelete }) {
 function GroupForm({ group, profile, userId, admin, deleteLabel, onSave, onDelete, onBackups }) {
   const [name, setName] = useState(group?.name || '');
   const [emoji, setEmoji] = useState(group?.emoji || '👥');
+  const [color, setColor] = useState(group?.color || 'teal');
   const [currency, setCurrency] = useState(group?.currency || 'CZK');
   const [members, setMembers] = useState(group?.members || [{ id: uid(), name: profile.name || 'Já', avatar: profile.avatar }, { id: uid(), name: '' }]);
   const [me, setMe] = useState(group?.me || members[0].id);
@@ -699,7 +740,7 @@ function GroupForm({ group, profile, userId, admin, deleteLabel, onSave, onDelet
     const ms = members.filter((m) => m.name.trim() || used.has(m.id)).map((m) => ({ ...m, name: m.name.trim() || '?', iban: (m.iban || '').trim() }));
     onSave({
       ...(group || {}), id: group?.id || uid(), entries: group?.entries || [],
-      name: name.trim(), emoji, currency, members: ms, me: ms.some((m) => m.id === me) ? me : ms[0].id,
+      name: name.trim(), emoji, color, currency, members: ms, me: ms.some((m) => m.id === me) ? me : ms[0].id,
     });
   }
 
@@ -709,10 +750,17 @@ function GroupForm({ group, profile, userId, admin, deleteLabel, onSave, onDelet
         <span>Název</span>
         <input placeholder="např. Dovolená Chorvatsko" value=${name} onInput=${(e) => setName(e.target.value)} />
       </label>
-      <div class="chips">
-        ${[...new Set([...EMOJIS, emoji])].map((e) => html`<button type="button" class=${'chip emoji' + (e === emoji ? ' on' : '')} onClick=${() => setEmoji(e)}>${e}</button>`)}
-        <input class="emoji-input" placeholder="+ vlastní" aria-label="Vlastní emoji" value=""
-          onInput=${(e) => { const g = firstEmoji(e.target.value); if (g) setEmoji(g); e.target.value = ''; }} />
+      <div class="field">
+        <span>Ikona</span>
+        <${EmojiPicker} value=${emoji} onChange=${setEmoji} />
+      </div>
+      <div class="field">
+        <span>Barva skupiny</span>
+        <div class="swatches">
+          ${COLORS.map(([id, label]) => html`
+            <button type="button" class=${'swatch gc-' + id + (id === color ? ' on' : '')} title=${label} aria-label=${label}
+              aria-pressed=${id === color} onClick=${() => setColor(id)}></button>`)}
+        </div>
       </div>
       <label class="field">
         <span>Měna skupiny</span>
@@ -954,7 +1002,7 @@ function PasswordForm({ label = 'Změnit heslo', onDone }) {
   `;
 }
 
-function ProfileSheet({ profile, user, admin, onSave, onLogout, onDeleteAccount }) {
+function ProfileSheet({ profile, user, admin, onSave, onLogout, onDeleteAccount, onImport }) {
   const [name, setName] = useState(profile.name);
   const [avatar, setAvatar] = useState(profile.avatar);
   return html`
@@ -972,6 +1020,10 @@ function ProfileSheet({ profile, user, admin, onSave, onLogout, onDeleteAccount 
       </label>
       <p class="hint">Fotku a jméno uvidí jen lidé ve tvých skupinách. Fotka se zmenší a uloží bez údajů o poloze.</p>
       <button class="btn primary wide" onClick=${() => onSave({ name: name.trim(), avatar })}>Uložit</button>
+
+      <hr />
+      <div class="field"><span>Nástroje</span></div>
+      <button class="btn wide" onClick=${onImport}>Importovat skupinu ze Settle Up</button>
 
       ${user && html`
         <hr />
@@ -1302,7 +1354,7 @@ function App({ user, recovery }) {
       const members = data.members.map((m) => ({ ...m, uid: group.members.find((x) => x.id === m.id)?.uid }));
       for (const m of group.members) if (m.uid && !members.some((x) => x.id === m.id)) members.push(m);
       putGroup(withMe({
-        ...group, name: data.name, emoji: data.emoji, members, dead, mu: now,
+        ...group, name: data.name, emoji: data.emoji, color: data.color, members, dead, mu: now,
         entries: data.entries.map((e) => ({ ...e, u: now })),
       }));
     } catch {
@@ -1354,11 +1406,11 @@ function App({ user, recovery }) {
       <div class="layout">
         <aside class=${'side' + (group ? ' has-group' : '')}>
           <${Home} groups=${groups} profile=${prof} account=${!!user} activeId=${gid} onOpen=${setGid}
-            onNew=${() => setSheet({ type: 'group' })} onProfile=${() => setSheet({ type: 'profile' })} onImport=${importSettleUp}
+            onNew=${() => setSheet({ type: 'group' })} onProfile=${() => setSheet({ type: 'profile' })}
             onReorder=${(from, to) => setGroups((gs) => { const a = [...gs]; const [x] = a.splice(from, 1); a.splice(to, 0, x); return a; })}
             onSortByName=${() => setGroups((gs) => [...gs].sort((a, b) => a.name.localeCompare(b.name, 'cs', { sensitivity: 'base' })))} />
         </aside>
-        <section class="main-pane">
+        <section class=${'main-pane gc-' + (group?.color || 'teal')}>
           ${group
             ? html`<${GroupView} key=${group.id} group=${group}
             onBack=${() => setGid(null)}
@@ -1397,7 +1449,8 @@ function App({ user, recovery }) {
         <//>`}
       ${sheet?.type === 'profile' && html`
         <${Sheet} title="Můj profil" onClose=${close}>
-          <${ProfileSheet} profile=${profile} user=${user} admin=${admin} onSave=${saveProfile} onLogout=${() => logout()} onDeleteAccount=${removeAccount} />
+          <${ProfileSheet} profile=${profile} user=${user} admin=${admin} onSave=${saveProfile} onLogout=${() => logout()} onDeleteAccount=${removeAccount}
+            onImport=${() => { close(); importSettleUp(); }} />
         <//>`}
       ${sheet?.type === 'newpw' && html`
         <${Sheet} title="Nastav si nové heslo" onClose=${close}>
