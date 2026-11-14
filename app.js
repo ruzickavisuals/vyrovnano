@@ -14,7 +14,7 @@ import {
 import { GOOGLE_LOGIN } from './config.js';
 import { parseSettleUp, decodeText } from './import.js';
 import { EMOJI, COLORS } from './emoji.js';
-import { pushSupported, isStandalone, isIos, pushState, enablePush, disablePush, notifyGroup } from './push.js';
+import { pushSupported, isStandalone, isIos, pushState, enablePush, disablePush, notifyGroup, testPush } from './push.js';
 
 const KEY = 'vyrovnano.v1';
 const JKEY = 'vyrovnano.join';
@@ -1531,7 +1531,16 @@ function PushSettings() {
               ${busy ? 'Moment…' : state === 'on' ? 'Vypnout' : 'Zapnout'}
             </button>
           </div>
-          <p class="hint">${msg || 'Dostaneš zprávu, když někdo ve tvé skupině přidá, upraví nebo smaže výdaj, uhradí dluh nebo se připojí. Vlastní změny ti nechodí.'}</p>`}
+          <p class="hint">${msg || 'Dostaneš zprávu, když někdo ve tvé skupině přidá, upraví nebo smaže výdaj, uhradí dluh nebo se připojí. Vlastní změny ti nechodí.'}</p>
+          ${state === 'on' && html`<button class="btn wide" disabled=${busy} onClick=${async () => {
+            setBusy(true);
+            try {
+              const r = await testPush();
+              setMsg(r.sent > 0 ? 'Zkušební notifikace odeslána. Měla by dorazit během pár vteřin.'
+                : `Zkušební notifikaci se nepodařilo doručit${r.failed ? ` (chyba ${r.failed})` : ''}.`);
+            } catch { setMsg('Zkušební notifikaci se nepodařilo odeslat.'); }
+            setBusy(false);
+          }}>Poslat zkušební notifikaci</button>`}`}
     </section>
   `;
 }

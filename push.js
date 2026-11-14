@@ -53,5 +53,8 @@ export async function disablePush(remove) {
   await sub.unsubscribe();
 }
 
+// Zkušební zpráva na vlastní zařízení; vrací { sent, devices, failed? }.
+export const testPush = () => call('POST', { test: true, title: 'Vyrovnáno', body: 'Zkušební notifikace: funguje to 🎉' });
+
 // Pošle zprávu ostatním členům skupiny. Selhání se nehlásí – notifikace je jen doplněk.
 export const notifyGroup = (groupId, title, body) => call('POST', { group_id: groupId, title, body }).catch(() => {});
