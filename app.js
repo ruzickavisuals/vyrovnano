@@ -29,9 +29,15 @@ const PKEY = 'vyrovnano.profile';
 function loadProfile(key) {
   try {
     const p = JSON.parse(localStorage.getItem(key));
-    if (p && typeof p === 'object') return { name: String(p.name || ''), avatar: p.avatar };
+    if (p && typeof p === 'object') {
+      return {
+        name: String(p.name || ''), avatar: p.avatar, iban: String(p.iban || ''),
+        currency: CURRENCIES.includes(p.currency) ? p.currency : 'CZK',
+        theme: ['light', 'dark'].includes(p.theme) ? p.theme : 'auto',
+      };
+    }
   } catch {}
-  return { name: '' };
+  return { name: '', iban: '', currency: 'CZK', theme: 'auto' };
 }
 
 // První emoji z napsaného textu (i složené, např. vlajky nebo rodina).
@@ -46,10 +52,10 @@ const nameOf = (g, id) => g.members.find((m) => m.id === id)?.name || '?';
 // Logo aplikace; varianta se volí podle světlého/tmavého režimu.
 function Logo() {
   return html`
-    <picture class="logo">
-      <source srcset="brand/logo-dark.svg" media="(prefers-color-scheme: dark)" />
-      <img src="brand/logo-light.svg" alt="Vyrovnáno" width="590" height="116" />
-    </picture>`;
+    <span class="logo">
+      <img class="logo-d" src="brand/logo-dark.svg" alt="Vyrovnáno" width="590" height="116" />
+      <img class="logo-l" src="brand/logo-light.svg" alt="Vyrovnáno" width="590" height="116" />
+    </span>`;
 }
 
 // Linkové ikony pro spodní lištu a vyhledávání.
@@ -58,6 +64,14 @@ const ICONS = {
   search: 'M11 18a7 7 0 1 0 0-14 7 7 0 0 0 0 14zM20 20l-4-4',
   plus: 'M12 5v14M5 12h14',
   user: 'M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM5 20a7 7 0 0 1 14 0',
+  swap: 'M6 8h12l-3-3M18 16H6l3 3',
+  back: 'M15 5l-7 7 7 7',
+  left: 'M15 6l-6 6 6 6',
+  right: 'M9 6l6 6-6 6',
+  down: 'M6 9l6 6 6-6',
+  close: 'M6 6l12 12M18 6L6 18',
+  share: 'M12 15V4M8 8l4-4 4 4M5 12v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6',
+  settings: 'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z',
 };
 function Icon({ name, size = 22 }) {
   return html`<svg class="ic" width=${size} height=${size} viewBox="0 0 24 24" fill="none" stroke="currentColor"
@@ -72,7 +86,7 @@ function Sheet({ title, onClose, children }) {
       <div class="sheet" role="dialog" aria-label=${title}>
         <div class="sheet-head">
           <h2>${title}</h2>
-          <button class="icon-btn" onClick=${onClose} aria-label="Zavřít">✕</button>
+          <button class="icon-btn" onClick=${onClose} aria-label="Zavřít"><${Icon} name="close" size=${18} /></button>
         </div>
         <div class="sheet-body">${children}</div>
       </div>
@@ -170,7 +184,7 @@ function Select({ value, options, onChange, label, disabled }) {
     <div class="select" ref=${ref} onClick=${(e) => e.preventDefault()}>
       <button type="button" class="select-btn" aria-haspopup="listbox" aria-expanded=${open} aria-label=${label}
         disabled=${disabled} onClick=${toggle}>
-        <span class="select-val">${cur ? cur[1] : ''}</span><i aria-hidden="true">▾</i>
+        <span class="select-val">${cur ? cur[1] : ''}</span><${Icon} name="down" size=${16} />
       </button>
       ${open && html`
         <div class="select-menu" role="listbox" style=${pos}>
@@ -204,14 +218,14 @@ function DateField({ value, onChange }) {
     <div class="select" ref=${ref} onClick=${(e) => e.preventDefault()}>
       <button type="button" class="select-btn" aria-label="Datum" aria-expanded=${open}
         onClick=${() => { setView(value.slice(0, 7)); if (!open) setPos(popupStyle(ref.current, 308, 348)); setOpen(!open); }}>
-        <span class="select-val">${label}</span><i aria-hidden="true">▾</i>
+        <span class="select-val">${label}</span><${Icon} name="down" size=${16} />
       </button>
       ${open && html`
         <div class="select-menu cal" style=${pos}>
           <div class="cal-head">
-            <button type="button" class="cal-nav" onClick=${() => shift(-1)} aria-label="Předchozí měsíc">‹</button>
+            <button type="button" class="cal-nav" onClick=${() => shift(-1)} aria-label="Předchozí měsíc"><${Icon} name="left" size=${18} /></button>
             <strong>${first.toLocaleDateString('cs-CZ', { month: 'long', year: 'numeric' })}</strong>
-            <button type="button" class="cal-nav" onClick=${() => shift(1)} aria-label="Další měsíc">›</button>
+            <button type="button" class="cal-nav" onClick=${() => shift(1)} aria-label="Další měsíc"><${Icon} name="right" size=${18} /></button>
           </div>
           <div class="cal-grid">
             ${['Po', 'Út', 'St', 'Čt', 'Pá', 'So', 'Ne'].map((d) => html`<span class="dow">${d}</span>`)}
@@ -280,7 +294,7 @@ function EmojiPicker({ value, onChange }) {
     <div class="select" ref=${ref} onClick=${(e) => e.preventDefault()}>
       <button type="button" class="select-btn emoji-btn" aria-label="Vybrat ikonu skupiny" aria-expanded=${open}
         onClick=${() => { if (!open) { setQ(''); setPos(popupStyle(ref.current, 340, 396)); } setOpen(!open); }}>
-        <span class="select-val"><span class="emoji-now">${value}</span>Změnit ikonu</span><i aria-hidden="true">▾</i>
+        <span class="select-val"><span class="emoji-now">${value}</span>Změnit ikonu</span><${Icon} name="down" size=${16} />
       </button>
       ${open && html`
         <div class="select-menu emoji-menu" style=${pos}>
@@ -375,6 +389,7 @@ function Home({ groups, profile, account, activeId, onOpen, onNew, onProfile, on
       })}
       </div>
       <button class="btn primary wide" onClick=${onNew}>+ Nová skupina</button>
+      <${WelcomeCard} groups=${groups} name=${profile.name} />
     </main>
   `;
 }
@@ -394,30 +409,50 @@ const QUIPS = [
   ['🐢', 'Dluh není želva, sám neuteče. Ale taky sám nepřijde.'],
 ];
 
-function Welcome({ groups, name }) {
-  // Hláška se vybere jednou při zobrazení, ať při každém překreslení neskáče.
+// Pozdrav, celkový stav přes všechny skupiny a náhodná hláška (vybraná jednou při zobrazení).
+function useWelcome(groups, name) {
   const quip = useMemo(() => QUIPS[Math.floor(Math.random() * QUIPS.length)], []);
   const hour = new Date().getHours();
   const hello = hour < 5 ? 'Dobrou noc' : hour < 10 ? 'Dobré ráno' : hour < 18 ? 'Ahoj' : 'Dobrý večer';
-  // Můj celkový stav napříč skupinami, zvlášť pro každou měnu.
   const totals = {};
   for (const g of groups) {
     const my = balances(g)[g.me] || 0;
     if (my) totals[g.currency] = (totals[g.currency] || 0) + my;
   }
   const lines = Object.entries(totals).filter(([, v]) => v);
+  const sum = groups.length === 0
+    ? html`Zatím tu nemáš žádnou skupinu. Vytvoř první.`
+    : lines.length === 0
+      ? html`<span class="pos">Se všemi jsi vyrovnaný.</span> Užij si ten vzácný pocit.`
+      : html`${lines.map(([cur, v], i) => html`${i ? ' a ' : ''}${v > 0 ? 'Celkem ti lidi dluží ' : 'Celkem dlužíš '}<strong class=${v > 0 ? 'pos' : 'neg'}>${fmt(Math.abs(v), cur)}</strong>`)}.`;
+  return { quip, greeting: `${hello}${name ? `, ${vocative(name)}` : ''}`, sum };
+}
+
+// Počítač: velká plocha vpravo, když není vybraná skupina.
+function Welcome({ groups, name }) {
+  const { quip, greeting, sum } = useWelcome(groups, name);
   return html`
     <div class="placeholder welcome">
       <div class="big">${quip[0]}</div>
-      <h2>${hello}${name ? `, ${vocative(name)}` : ''}</h2>
-      ${groups.length === 0
-        ? html`<p class="welcome-sum">Zatím tu nemáš žádnou skupinu. Vytvoř první vlevo.</p>`
-        : lines.length === 0
-          ? html`<p class="welcome-sum"><span class="pos">Se všemi jsi vyrovnaný.</span> Užij si ten vzácný pocit.</p>`
-          : html`<p class="welcome-sum">${lines.map(([cur, v], i) => html`${i ? ' a ' : ''}${v > 0 ? 'Celkem ti lidi dluží ' : 'Celkem dlužíš '}<strong class=${v > 0 ? 'pos' : 'neg'}>${fmt(Math.abs(v), cur)}</strong>`)}.</p>`}
+      <h2>${greeting}</h2>
+      <p class="welcome-sum">${sum}</p>
       <p class="welcome-quip">${quip[1]}</p>
       ${groups.length > 0 && html`<p class="muted welcome-hint">Vyber skupinu ze seznamu vlevo.</p>`}
     </div>
+  `;
+}
+
+// Telefon: totéž jako karta pod seznamem skupin.
+function WelcomeCard({ groups, name }) {
+  const { quip, greeting, sum } = useWelcome(groups, name);
+  return html`
+    <section class="welcome-card only-narrow">
+      <div class="row">
+        <span class="welcome-emoji">${quip[0]}</span>
+        <div class="grow"><h2>${greeting}</h2><p class="welcome-sum">${sum}</p></div>
+      </div>
+      <p class="welcome-quip">${quip[1]}</p>
+    </section>
   `;
 }
 
@@ -451,11 +486,12 @@ function GroupView({ group, onBack, onEdit, onShare, onEntry, onAdd, onPay, onQr
   return html`
     <header class="top group-top">
       <div class="row">
-        <button class="icon-btn back" onClick=${onBack} aria-label="Zpět">‹</button>
+        <button class="icon-btn back" onClick=${onBack} aria-label="Zpět"><${Icon} name="back" size=${20} /></button>
         <h1 class="grow">${group.emoji} ${group.name}</h1>
+        <button class="btn primary small only-wide add-btn" onClick=${onAdd}>+ Přidat záznam</button>
         <button class="icon-btn only-wide" onClick=${onSearch} aria-label="Hledat ve skupině" title="Hledat (klávesa /)"><${Icon} name="search" size=${18} /></button>
-        <button class="icon-btn" onClick=${onShare} aria-label="Sdílet skupinu">🔗</button>
-        <button class="icon-btn" onClick=${onEdit} aria-label="Upravit skupinu">⚙︎</button>
+        <button class="icon-btn" onClick=${onShare} aria-label="Sdílet skupinu"><${Icon} name="share" size=${18} /></button>
+        <button class="icon-btn" onClick=${onEdit} aria-label="Upravit skupinu"><${Icon} name="settings" size=${18} /></button>
       </div>
       <div class="hero">
         <div>
@@ -798,8 +834,8 @@ function GroupForm({ group, profile, userId, admin, deleteLabel, onSave, onDelet
   const [name, setName] = useState(group?.name || '');
   const [emoji, setEmoji] = useState(group?.emoji || '👥');
   const [color, setColor] = useState(group?.color || 'teal');
-  const [currency, setCurrency] = useState(group?.currency || 'CZK');
-  const [members, setMembers] = useState(group?.members || [{ id: uid(), name: profile.name || 'Já', avatar: profile.avatar }, { id: uid(), name: '' }]);
+  const [currency, setCurrency] = useState(group?.currency || profile.currency || 'CZK');
+  const [members, setMembers] = useState(group?.members || [{ id: uid(), name: profile.name || 'Já', avatar: profile.avatar, iban: profile.iban || undefined }, { id: uid(), name: '' }]);
   const [me, setMe] = useState(group?.me || members[0].id);
   const used = new Set((group?.entries || []).flatMap((e) => [e.paidBy, ...Object.keys(e.parts)]));
   // Číslo účtu smí měnit jen ten, komu člen patří, nebo správce aplikace (totéž hlídá server).
@@ -859,7 +895,7 @@ function GroupForm({ group, profile, userId, admin, deleteLabel, onSave, onDelet
                 : html`<label class="me-pick"><input type="radio" name="me" checked=${me === m.id} onChange=${() => setMe(m.id)} /> já</label>`}
               <button type="button" class="icon-btn" disabled=${used.has(m.id) || members.length <= 2}
                 title=${used.has(m.id) ? 'Má výdaje, nejde odebrat' : 'Odebrat'}
-                onClick=${() => setMembers((ms) => ms.filter((x) => x.id !== m.id))}>✕</button>
+                onClick=${() => setMembers((ms) => ms.filter((x) => x.id !== m.id))}><${Icon} name="close" size=${16} /></button>
             </div>
             <input class="iban" maxlength="50" value=${m.iban || ''} onInput=${(e) => upd(m.id, { iban: e.target.value })}
               disabled=${!mayIban(m)}
@@ -1085,7 +1121,7 @@ function SearchSheet({ groups, scopeName, onOpen }) {
         <${Icon} name="search" size=${18} />
         <input ref=${inputRef} value=${q} placeholder="Název, částka, člověk, kategorie, datum…" aria-label="Hledat"
           enterkeyhint="search" autocomplete="off" autocapitalize="off" onInput=${(e) => setQ(e.target.value)} />
-        ${q && html`<button type="button" class="search-clear" aria-label="Smazat hledání" onClick=${() => { setQ(''); inputRef.current.focus(); }}>✕</button>`}
+        ${q && html`<button type="button" class="search-clear" aria-label="Smazat hledání" onClick=${() => { setQ(''); inputRef.current.focus(); }}><${Icon} name="close" size=${12} /></button>`}
       </div>
       <p class="hint">Hledám ${many ? 've všech skupinách' : `ve skupině ${scopeName}`}. Slova můžeš kombinovat, třeba „internet michal 2026“ nebo „kafe >300“.</p>
 
@@ -1121,6 +1157,46 @@ function SearchSheet({ groups, scopeName, onOpen }) {
           })}
         </div>
         ${found.length > 80 && html`<p class="hint center">Zobrazuji prvních 80. Upřesni hledání a uvidíš zbytek.</p>`}`}
+    </div>
+  `;
+}
+
+/* ---------- Moje dluhy napříč skupinami ---------- */
+
+function AllDebts({ groups, onOpen }) {
+  const rows = [];
+  const get = {}, owe = {};
+  for (const g of groups) {
+    for (const p of settle(balances(g))) {
+      if (p.from !== g.me && p.to !== g.me) continue;
+      const mine = p.to === g.me; // true = někdo dluží mně
+      rows.push({ g, p, mine, other: g.members.find((m) => m.id === (mine ? p.from : p.to)) });
+      (mine ? get : owe)[g.currency] = ((mine ? get : owe)[g.currency] || 0) + p.amount;
+    }
+  }
+  rows.sort((a, b) => b.p.amount - a.p.amount);
+  const total = (o) => Object.entries(o).map(([c, v]) => fmt(v, c)).join(' + ') || fmt(0, 'CZK');
+  return html`
+    <div class="form">
+      <div class="two">
+        <div class="card set-card tile"><small class="muted">Dostaneš</small><strong class="pos">${total(get)}</strong></div>
+        <div class="card set-card tile"><small class="muted">Dlužíš</small><strong class="neg">${total(owe)}</strong></div>
+      </div>
+      ${rows.length === 0
+        ? html`<div class="card pad center settled">✓ Se všemi jsi vyrovnaný.</div>`
+        : html`
+          <div class="card list">
+            ${rows.map(({ g, p, mine, other }) => html`
+              <button class="item" onClick=${() => onOpen(g.id)}>
+                <${Avatar} m=${other} size=${40} />
+                <span class="grow">
+                  <strong>${other?.name || '?'}</strong>
+                  <small class="muted">${mine ? 'dluží ti' : 'dlužíš'} · ${g.emoji} ${g.name}</small>
+                </span>
+                <span class="right"><strong class=${mine ? 'pos' : 'neg'}>${mine ? '+' : '−'}${fmt(p.amount, g.currency)}</strong></span>
+              </button>`)}
+          </div>
+          <p class="hint">Klepnutím otevřeš skupinu, kde dluh uhradíš, pošleš QR platbu nebo ho převedeš jinam.</p>`}
     </div>
   `;
 }
@@ -1264,36 +1340,97 @@ function PasswordForm({ label = 'Změnit heslo', onDone }) {
   `;
 }
 
-function ProfileSheet({ profile, user, admin, onSave, onLogout, onDeleteAccount, onImport }) {
+function ProfileSheet({ profile, user, admin, groupCount, onSave, onLogout, onDeleteAccount, onImport, onExportAll }) {
   const [name, setName] = useState(profile.name);
   const [avatar, setAvatar] = useState(profile.avatar);
+  const [iban, setIban] = useState(profile.iban || '');
+  const [currency, setCurrency] = useState(profile.currency || 'CZK');
+  const [theme, setTheme] = useState(profile.theme || 'auto');
+  const ibanBad = !!iban.trim() && !toIban(iban);
+  const dirty = name.trim() !== profile.name || avatar !== profile.avatar || iban.trim() !== (profile.iban || '')
+    || currency !== (profile.currency || 'CZK') || theme !== (profile.theme || 'auto');
+  const pick = async () => { const a = await pickImage(); if (a) setAvatar(a); };
   return html`
-    <div class="form">
-      <div class="profile-pic">
-        <${Avatar} m=${{ id: 'me', name: name || '🙂', avatar }} size=${96} />
-        <div class="row">
-          <button class="btn small" onClick=${async () => { const a = await pickImage(); if (a) setAvatar(a); }}>${avatar ? 'Změnit fotku' : 'Přidat fotku'}</button>
-          ${avatar && html`<button class="btn small danger" onClick=${() => setAvatar(undefined)}>Odebrat</button>`}
+    <div class="form settings">
+      <div class="profile-head">
+        <button class="ava-btn" onClick=${pick} aria-label="Změnit fotku">
+          <${Avatar} m=${{ id: 'me', name: name || '🙂', avatar }} size=${84} />
+        </button>
+        <div class="grow">
+          <strong class="profile-name">${name.trim() || 'Bez jména'}</strong>
+          ${user && html`<small class="muted">${user.email}</small>`}
+          <div class="row profile-photo-actions">
+            <button class="btn small" onClick=${pick}>${avatar ? 'Změnit fotku' : 'Přidat fotku'}</button>
+            ${avatar && html`<button class="btn small danger" onClick=${() => setAvatar(undefined)}>Odebrat</button>`}
+          </div>
         </div>
       </div>
-      <label class="field">
-        <span>Jméno</span>
-        <input value=${name} maxlength="60" placeholder="Jak ti říkají" onInput=${(e) => setName(e.target.value)} />
-      </label>
-      <p class="hint">Fotku a jméno uvidí jen lidé ve tvých skupinách. Fotka se zmenší a uloží bez údajů o poloze.</p>
-      <button class="btn primary wide" onClick=${() => onSave({ name: name.trim(), avatar })}>Uložit</button>
 
-      <hr />
-      <div class="field"><span>Nástroje</span></div>
-      <button class="btn wide" onClick=${onImport}>Importovat skupinu ze Settle Up</button>
+      <section class="card set-card">
+        <h3>Osobní údaje</h3>
+        <label class="field">
+          <span>Jméno</span>
+          <input value=${name} maxlength="60" placeholder="Jak ti říkají" onInput=${(e) => setName(e.target.value)} />
+        </label>
+        <p class="hint">Jméno a fotku uvidí jen lidé ve tvých skupinách. Fotka se zmenší a uloží bez údajů o poloze.</p>
+      </section>
+
+      <section class="card set-card">
+        <h3>Platební údaje</h3>
+        <label class="field">
+          <span>Číslo účtu</span>
+          <input value=${iban} maxlength="50" inputmode="text" autocomplete="off" placeholder="např. 123456789/0800 nebo IBAN"
+            onInput=${(e) => setIban(e.target.value)} />
+        </label>
+        ${ibanBad
+          ? html`<p class="hint neg">Tohle nevypadá jako číslo účtu. Zadej ho ve tvaru 123456789/0800 nebo jako IBAN.</p>`
+          : html`<p class="hint">Použije se pro QR platby ve všech tvých skupinách: kdo ti dluží, naskenuje kód a částka i účet se vyplní samy.${
+              iban.trim() ? ` IBAN: ${toIban(iban)}` : ''}</p>`}
+      </section>
+
+      <section class="card set-card">
+        <h3>Předvolby</h3>
+        <div class="field">
+          <span>Výchozí měna nových skupin</span>
+          <${Select} label="Výchozí měna" value=${currency} onChange=${setCurrency} options=${CURRENCIES.map((c) => [c, c])} />
+        </div>
+        <div class="field">
+          <span>Vzhled</span>
+          <${Seg} value=${theme} onChange=${setTheme} options=${[['auto', 'Podle systému'], ['light', 'Světlý'], ['dark', 'Tmavý']]} />
+        </div>
+      </section>
+
+      <button class="btn primary wide" disabled=${!dirty || ibanBad}
+        onClick=${() => onSave({ name: name.trim(), avatar, iban: iban.trim(), currency, theme })}>
+        ${dirty ? 'Uložit změny' : 'Vše uloženo'}
+      </button>
 
       ${user && html`
-        <hr />
-        <div class="field"><span>Účet${admin ? ' · správce aplikace' : ''}</span><div>${user.email}${user.provider !== 'email' ? ` · přihlášení přes ${user.provider === 'google' ? 'Google' : user.provider}` : ''}</div></div>
-        ${user.provider === 'email' && html`<${PasswordForm} />`}
-        <button class="btn wide" onClick=${onLogout}>Odhlásit se</button>
-        <button class="btn danger wide" onClick=${onDeleteAccount}>Smazat účet</button>
-      `}
+        <section class="card set-card">
+          <h3>Účet a zabezpečení</h3>
+          <dl class="facts">
+            <dt>E-mail</dt><dd>${user.email}</dd>
+            <dt>Přihlášení</dt><dd>${user.provider === 'google' ? 'přes Google' : 'e-mailem a heslem'}</dd>
+            <dt>Skupiny</dt><dd>${groupCount}</dd>
+            ${admin && html`<dt>Role</dt><dd>správce aplikace</dd>`}
+          </dl>
+          ${user.provider === 'email' && html`<${PasswordForm} />`}
+          <button class="btn wide" onClick=${onLogout}>Odhlásit se</button>
+        </section>`}
+
+      <section class="card set-card">
+        <h3>Data</h3>
+        <button class="btn wide" onClick=${onExportAll}>Stáhnout všechny moje skupiny</button>
+        <p class="hint">Soubor se zálohou všech skupin, výdajů a členů. Ulož si ho tam, kam nemá přístup nikdo cizí.</p>
+        <button class="btn wide" onClick=${onImport}>Importovat skupinu ze Settle Up</button>
+      </section>
+
+      ${user && html`
+        <section class="card set-card">
+          <h3>Smazání účtu</h3>
+          <p class="hint">Skupiny, kde jsi jediný, zmizí. Ve sdílených skupinách zůstanou tvoje výdaje ostatním. Nejde to vrátit.</p>
+          <button class="btn danger wide" onClick=${onDeleteAccount}>Smazat účet</button>
+        </section>`}
     </div>
   `;
 }
@@ -1452,7 +1589,7 @@ function App({ user, recovery }) {
       setProfile((p) => {
         if (p.name || p.avatar) return p;
         const mine = rows.flatMap((r) => r.data.members).find((m) => m.uid === user.id);
-        return mine ? { name: mine.name, avatar: mine.avatar } : p;
+        return mine ? { ...p, name: mine.name, avatar: mine.avatar, iban: mine.iban || '' } : p;
       });
       setSyncState('ok');
     } catch {
@@ -1587,24 +1724,36 @@ function App({ user, recovery }) {
     if (taken && taken !== user?.id) return notify('Tohoto člena si mezitím vybral někdo jiný. Vyber prosím jiného.');
     if (id) {
       putGroup({ ...group, mu: Date.now(), me: id,
-        members: group.members.map((m) => (m.id === id ? { ...m, ...mine, avatar: m.avatar || profile.avatar } : m)) });
+        members: group.members.map((m) => (m.id === id ? { ...m, ...mine, avatar: m.avatar || profile.avatar, iban: m.iban || profile.iban || undefined } : m)) });
     } else {
-      const m = { id: uid(), name: newName, avatar: profile.avatar, ...mine };
+      const m = { id: uid(), name: newName, avatar: profile.avatar, iban: profile.iban || undefined, ...mine };
       putGroup({ ...group, mu: Date.now(), me: m.id, members: [...group.members, m] });
       if (!profile.name) setProfile({ ...profile, name: newName });
     }
   }
   function saveProfile(p) {
     setProfile(p);
+    // Jméno, fotka a číslo účtu se propíšou k „mému“ členovi ve všech skupinách.
     setGroups((gs) => gs.map((g) => {
       const me = g.members.find((m) => m.id === g.me);
       if (!me) return g;
       const name = p.name && (me.name === 'Já' || me.name === prof.name) ? p.name : me.name;
-      if (name === me.name && me.avatar === p.avatar) return g;
-      return { ...g, mu: Date.now(), members: g.members.map((m) => (m === me ? { ...m, name, avatar: p.avatar } : m)) };
+      const iban = p.iban !== (profile.iban || '') ? (p.iban || undefined) : me.iban;
+      if (name === me.name && me.avatar === p.avatar && (me.iban || '') === (iban || '')) return g;
+      return { ...g, mu: Date.now(), members: g.members.map((m) => (m === me ? { ...m, name, avatar: p.avatar, iban } : m)) };
     }));
     close();
   }
+  function exportAll() {
+    downloadFile(`vyrovnano-vsechny-skupiny-${today()}.json`,
+      JSON.stringify({ app: 'vyrovnano', exported: new Date().toISOString(), groups: groups.map(shared) }, null, 1));
+  }
+  // Ručně zvolený vzhled (světlý/tmavý) přebije nastavení systému.
+  useEffect(() => {
+    const t = profile.theme;
+    if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t;
+    else delete document.documentElement.dataset.theme;
+  }, [profile.theme]);
   function importSettleUp() {
     const input = document.createElement('input');
     input.type = 'file';
@@ -1730,13 +1879,14 @@ function App({ user, recovery }) {
         </section>
       </div>
 
-      <nav class="tabbar" aria-label="Hlavní nabídka">
+<nav class="tabbar" aria-label="Hlavní nabídka">
         <button class=${!group && !sheet ? 'on' : ''} onClick=${() => { close(); setGid(null); }}><${Icon} name="home" /><span>Skupiny</span></button>
         <button class=${sheet?.type === 'search' ? 'on' : ''} onClick=${() => setSheet({ type: 'search', all: !group })}><${Icon} name="search" /><span>Hledat</span></button>
-        <button class="add" onClick=${() => setSheet(group ? { type: 'entry' } : { type: 'group' })}>
-          <span class="plus"><${Icon} name="plus" size=${24} /></span><span>${group ? 'Přidat' : 'Nová skupina'}</span>
+        <button class="add" aria-label=${group ? 'Přidat záznam' : 'Nová skupina'} onClick=${() => setSheet(group ? { type: 'entry' } : { type: 'group' })}>
+          <span class="plus"><${Icon} name="plus" size=${26} /></span><span>${group ? 'Záznam' : 'Skupina'}</span>
         </button>
-        <button class=${sheet?.type === 'profile' ? 'on' : ''} onClick=${() => setSheet({ type: 'profile' })}><${Icon} name="user" /><span>Profil</span></button>
+        <button class=${sheet?.type === 'alldebts' ? 'on' : ''} onClick=${() => setSheet({ type: 'alldebts' })}><${Icon} name="swap" /><span>Dluhy</span></button>
+        <button class=${sheet?.type === 'profile' ? 'on' : ''} onClick=${() => setSheet({ type: 'profile' })}><${Icon} name="user" /><span>Účet</span></button>
       </nav>
 
       ${sheet?.type === 'group' && html`
@@ -1751,6 +1901,10 @@ function App({ user, recovery }) {
             ? html`<${MovedInfo} group=${group} entry=${sheet.entry} other=${groups.find((g) => g.id === sheet.entry.mvg)}
                 onDelete=${() => deleteEntry(sheet.entry.id)} />`
             : html`<${EntryForm} group=${group} entry=${sheet.entry} onSave=${saveEntry} onDelete=${() => deleteEntry(sheet.entry.id)} />`}
+        <//>`}
+      ${sheet?.type === 'alldebts' && html`
+        <${Sheet} title="Moje dluhy" onClose=${close}>
+          <${AllDebts} groups=${groups} onOpen=${(id) => { close(); setGid(id); }} />
         <//>`}
       ${sheet?.type === 'search' && html`
         <${Sheet} title="Hledat" onClose=${close}>
@@ -1774,8 +1928,9 @@ function App({ user, recovery }) {
           <${BackupSheet} group=${group} user=${user} onRestore=${restoreBackup} />
         <//>`}
       ${sheet?.type === 'profile' && html`
-        <${Sheet} title="Můj profil" onClose=${close}>
-          <${ProfileSheet} profile=${profile} user=${user} admin=${admin} onSave=${saveProfile} onLogout=${() => logout()} onDeleteAccount=${removeAccount}
+        <${Sheet} title="Nastavení účtu" onClose=${close}>
+          <${ProfileSheet} profile=${profile} user=${user} admin=${admin} groupCount=${groups.length} onSave=${saveProfile}
+            onLogout=${() => logout()} onDeleteAccount=${removeAccount} onExportAll=${exportAll}
             onImport=${() => { close(); importSettleUp(); }} />
         <//>`}
       ${sheet?.type === 'newpw' && html`
