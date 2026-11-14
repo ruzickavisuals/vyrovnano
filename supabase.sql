@@ -45,13 +45,18 @@ revoke all on public.groups, public.group_members from anon, authenticated;
 -- samotné heslo tedy k datům nestačí, ani při volání serveru napřímo.
 create or replace function public.uid()
 returns uuid
-language sql stable security definer set search_path = ''
+language plpgsql stable security definer set search_path = ''
 as $$
-  select case
-    when coalesce(auth.jwt() ->> 'aal', 'aal1') = 'aal2'
-      or not exists (select 1 from auth.mfa_factors f where f.user_id = auth.uid() and f.status::text = 'verified')
-    then auth.uid()
-  end;
+declare me uuid := auth.uid();
+begin
+  if me is null then return null; end if;
+  if coalesce(auth.jwt() ->> 'aal', 'aal1') <> 'aal2'
+     and exists (select 1 from auth.mfa_factors f where f.user_id = me and f.status::text = 'verified') then
+    -- Chyba místo prázdného výsledku: aplikace tak pozná, že má požádat o kód, a neukáže „žádné skupiny“.
+    raise exception 'mfa required';
+  end if;
+  return me;
+end;
 $$;
 revoke execute on function public.uid() from public, anon, authenticated;
 

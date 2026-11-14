@@ -191,7 +191,11 @@ export async function consumeUrl() {
 export async function refreshMfa() {
   const token = await accessToken();
   if (!token || !session) return;
-  const u = await call('/user', { method: 'GET', token }).catch(() => null);
+  const u = await call('/user', { method: 'GET', token }).catch((e) => {
+    // Relace byla na serveru ukončena (odhlášení odjinud, zapnutí dvoufázového ověření): vrátíme se na přihlášení.
+    if (e.status === 401 || e.status === 403) set(null);
+    return null;
+  });
   if (!u || !session || u.id !== session.user.id) return;
   const mfa = mfaOf(u, session.access_token, null);
   if (JSON.stringify(mfa) !== JSON.stringify(session.mfa || null)) set({ ...session, mfa });

@@ -14,7 +14,7 @@ import {
 import { GOOGLE_LOGIN } from './config.js';
 import { parseSettleUp, decodeText } from './import.js';
 import { EMOJI, COLORS } from './emoji.js';
-import { pushSupported, isStandalone, isIos, pushState, enablePush, disablePush, notifyGroup, testPush } from './push.js';
+import { pushSupported, isStandalone, isIos, pushState, enablePush, disablePush, pausePush, resumePush, notifyGroup, testPush } from './push.js';
 
 const KEY = 'vyrovnano.v1';
 const JKEY = 'vyrovnano.join';
@@ -1907,7 +1907,10 @@ function App({ user, recovery }) {
   const [syncState, setSyncState] = useState('');
   const [admin, setAdmin] = useState(false);
   useEffect(() => {
-    if (user) isAdmin().then((v) => setAdmin(v === true)).catch(() => {});
+    if (!user) return;
+    isAdmin().then((v) => setAdmin(v === true)).catch(() => {});
+    // Notifikace zapnuté na tomto zařízení připojíme k přihlášenému účtu (po odhlášení a novém přihlášení).
+    resumePush(savePushSub).catch(() => {});
   }, []);
   const ref = useRef(groups);
   ref.current = groups;
@@ -2332,8 +2335,9 @@ function App({ user, recovery }) {
     if (!skipConfirm && !(await ask(dirty
       ? 'Některé změny se ještě neodeslaly na server a odhlášením se ztratí. Opravdu se odhlásit?'
       : 'Odhlásit se z tohoto zařízení?', { ok: 'Odhlásit se' }))) return;
-    // Notifikace patří k účtu: po odhlášení už na tohle zařízení nemají chodit.
-    if (!skipConfirm) await disablePush(deletePushSub).catch(() => {});
+    // Po odhlášení sem nemají chodit zprávy tohoto účtu; zařízení ale zůstane k notifikacím přihlášené
+    // a po dalším přihlášení se připojí samo (viz resumePush níže), nic se nemusí zapínat znovu.
+    if (!skipConfirm) await pausePush(deletePushSub).catch(() => {});
     // Při odhlášení z tohoto zařízení mažeme i uložená data, ať je neuvidí další člověk u stejného telefonu.
     leaving.current = true;
     localStorage.removeItem(gkey);
@@ -2470,14 +2474,14 @@ function Root() {
   return html`<${App} key=${user?.id || 'local'} user=${user} recovery=${boot.type === 'recovery'} /><${DialogHost} />`;
 }
 
-// Úvodní animace loga při otevření aplikace (asi 1,7 s): šipky se nakreslí, název se rozsvítí po písmenech.
+// Úvodní animace loga při otevření aplikace (necelá vteřina): šipky se nakreslí, název se rozsvítí po písmenech.
 function intro() {
   if (calm()) return;
   const layer = document.createElement('div');
   layer.className = 'splash';
   document.body.appendChild(layer);
-  const done = () => { layer.classList.add('out'); setTimeout(() => layer.remove(), 450); };
-  const fallback = setTimeout(done, 2500);
+  const done = () => { layer.classList.add('out'); setTimeout(() => layer.remove(), 300); };
+  const fallback = setTimeout(done, 1200);
   fetch('brand/logo-dark.svg').then((r) => r.text()).then((txt) => {
     const svg = new DOMParser().parseFromString(txt, 'image/svg+xml').documentElement;
     if (svg.nodeName !== 'svg') throw new Error('logo');
@@ -2490,11 +2494,11 @@ function intro() {
     word.setAttribute('class', 'sp-word');
     [...word.children].forEach((p, i) => {
       p.setAttribute('class', 'sp-l');
-      p.style.animationDelay = `${0.55 + i * 0.05}s`;
+      p.style.animationDelay = `${0.22 + i * 0.022}s`;
     });
     layer.appendChild(document.importNode(svg, true));
     clearTimeout(fallback);
-    setTimeout(done, 1700);
+    setTimeout(done, 800);
   }).catch(() => { clearTimeout(fallback); done(); });
 }
 intro();

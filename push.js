@@ -53,6 +53,26 @@ export async function disablePush(remove) {
   await sub.unsubscribe();
 }
 
+// Odhlášení: zařízení zůstane k notifikacím přihlášené, jen se na serveru odpojí od účtu,
+// aby zprávy odhlášeného člověka nechodily dál. Po dalším přihlášení se zase připojí samo.
+export async function pausePush(remove) {
+  if (!pushSupported()) return;
+  const reg = await navigator.serviceWorker.getRegistration();
+  const sub = reg && (await reg.pushManager.getSubscription());
+  if (sub) await remove(sub.endpoint);
+}
+
+// Po přihlášení (a při každém startu): když má zařízení notifikace zapnuté, připojí je k právě přihlášenému účtu.
+export async function resumePush(save) {
+  if (!pushSupported() || Notification.permission !== 'granted') return false;
+  const reg = await navigator.serviceWorker.getRegistration();
+  const sub = reg && (await reg.pushManager.getSubscription());
+  if (!sub) return false;
+  const j = sub.toJSON();
+  await save(j.endpoint, j.keys.p256dh, j.keys.auth);
+  return true;
+}
+
 // Zkušební zpráva na vlastní zařízení; vrací { sent, devices, failed? }.
 export const testPush = () => call('POST', { test: true, title: 'Zkušební notifikace', body: 'Funguje to 🎉' });
 

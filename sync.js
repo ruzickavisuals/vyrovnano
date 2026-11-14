@@ -1,11 +1,12 @@
 // Synchronizace skupin se serverem. Server vydá skupinu jen přihlášenému členovi;
 // tady řešíme slučování změn z více zařízení a kontrolu toho, co ze serveru přišlo.
 import { SUPABASE_URL, SUPABASE_KEY } from './config.js';
-import { accessToken } from './auth.js';
+import { refreshMfa, accessToken } from './auth.js';
 import { today } from './logic.js';
 
 export const syncEnabled = !!(SUPABASE_URL && SUPABASE_KEY);
 
+let lastCheck = 0;
 async function rpc(fn, body = {}) {
   const token = await accessToken();
   if (!token) throw new Error('Nepřihlášen');
@@ -14,7 +15,14 @@ async function rpc(fn, body = {}) {
     headers: { 'Content-Type': 'application/json', apikey: SUPABASE_KEY, Authorization: `Bearer ${token}` },
     body: JSON.stringify(body),
   });
-  if (!res.ok) throw new Error(`Server odpověděl ${res.status}`);
+  if (!res.ok) {
+    // Server odmítl: možná relace skončila nebo chybí ověření kódem. Zjistíme stav přihlášení (nejvýš jednou za 20 s).
+    if ([400, 401, 403].includes(res.status) && Date.now() - lastCheck > 20000) {
+      lastCheck = Date.now();
+      refreshMfa().catch(() => {});
+    }
+    throw new Error(`Server odpověděl ${res.status}`);
+  }
   return res.status === 204 ? null : res.json();
 }
 
