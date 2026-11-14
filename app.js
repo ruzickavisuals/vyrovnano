@@ -81,14 +81,65 @@ function Icon({ name, size = 22 }) {
 /* ---------- Drobné stavební prvky ---------- */
 
 function Sheet({ title, onClose, children }) {
+  // Dotyk: okno jde zavřít stažením záhlaví dolů, stejně jako v nativních aplikacích.
+  const [dy, setDy] = useState(0);
+  const start = useRef(null);
+  const down = (e) => { if (e.pointerType !== 'mouse' && !e.target.closest('button')) start.current = e.clientY; };
+  const move = (e) => { if (start.current !== null) setDy(Math.max(0, e.clientY - start.current)); };
+  const up = () => {
+    if (start.current === null) return;
+    start.current = null;
+    if (dy > 110) onClose(); else setDy(0);
+  };
   return html`
     <div class="overlay" onClick=${(e) => e.target === e.currentTarget && onClose()}>
-      <div class="sheet" role="dialog" aria-label=${title}>
-        <div class="sheet-head">
+      <div class=${'sheet' + (dy ? ' pulling' : '')} role="dialog" aria-label=${title} style=${dy ? `transform:translateY(${dy}px)` : ''}>
+        <div class="sheet-head" onPointerDown=${down} onPointerMove=${move} onPointerUp=${up} onPointerCancel=${up}>
+          <span class="grabber" aria-hidden="true"></span>
           <h2>${title}</h2>
           <button class="icon-btn" onClick=${onClose} aria-label="Zavřít"><${Icon} name="close" size=${18} /></button>
         </div>
         <div class="sheet-body">${children}</div>
+      </div>
+    </div>
+  `;
+}
+
+// Dotyk: řádek jde odsunout doleva a tím vyvolat smazání (smazání se vždy ještě potvrzuje).
+function SwipeRow({ onDelete, children }) {
+  const [dx, setDx] = useState(0);
+  const st = useRef(null);
+  const swiped = useRef(false);
+  const down = (e) => { if (e.pointerType !== 'mouse') st.current = { x: e.clientX, y: e.clientY, on: false }; };
+  const move = (e) => {
+    const p = st.current;
+    if (!p) return;
+    const ddx = e.clientX - p.x, ddy = e.clientY - p.y;
+    if (!p.on) {
+      if (Math.abs(ddy) > 10 && Math.abs(ddy) > Math.abs(ddx)) { st.current = null; return; } // svislé rolování
+      if (ddx > -10) return;
+      p.on = true;
+      swiped.current = true;
+      try { e.currentTarget.setPointerCapture(e.pointerId); } catch {}
+    }
+    setDx(Math.max(-140, Math.min(0, ddx)));
+  };
+  const up = () => {
+    const p = st.current;
+    st.current = null;
+    if (!p || !p.on) return;
+    const go = dx < -90;
+    setDx(0);
+    if (go) onDelete();
+    setTimeout(() => { swiped.current = false; }, 120);
+  };
+  return html`
+    <div class=${'swipe' + (dx ? ' swiping' : '') + (dx < -90 ? ' armed' : '')}>
+      <span class="swipe-bg" aria-hidden="true">Smazat</span>
+      <div class="swipe-fg" style=${dx ? `transform:translateX(${dx}px)` : ''}
+        onPointerDown=${down} onPointerMove=${move} onPointerUp=${up} onPointerCancel=${up}
+        onClickCapture=${(e) => { if (swiped.current) { e.stopPropagation(); e.preventDefault(); } }}>
+        ${children}
       </div>
     </div>
   `;
@@ -399,7 +450,7 @@ function Home({ groups, profile, account, activeId, onOpen, onNew, onProfile, on
       ${groups.length > 1 && html`
         <div class="list-tools">
           <button class="search-btn only-wide" onClick=${onSearch}><${Icon} name="search" size=${16} /> Hledat <kbd>/</kbd></button>
-          <button class="link-btn" onClick=${onSortByName}>Seřadit podle názvu</button>
+          <button class="link-btn only-wide" onClick=${onSortByName}>Seřadit podle názvu</button>
         </div>`}
       <div class=${'group-list' + (drag ? ' is-dragging' : '')} ref=${listRef}>
       ${groups.map((g, i) => {
@@ -497,7 +548,7 @@ function WelcomeCard({ groups, name }) {
 
 /* ---------- Detail skupiny ---------- */
 
-function GroupView({ group, onBack, onEdit, onShare, onEntry, onAdd, onPay, onQr, onMove, onSearch }) {
+function GroupView({ group, onBack, onEdit, onShare, onEntry, onAdd, onPay, onQr, onMove, onSearch, onDelete }) {
   const [tab, setTab] = useState('entries');
   const bal = useMemo(() => balances(group), [group]);
   const st = useMemo(() => stats(group), [group]);
@@ -547,7 +598,7 @@ function GroupView({ group, onBack, onEdit, onShare, onEntry, onAdd, onPay, onQr
     <main class="with-fab panels">
       <section class=${'panel p-entries' + (tab === 'entries' ? ' on' : '')}>
         <h2 class="panel-title">Výdaje</h2>
-        <${Entries} group=${group} onEntry=${onEntry} />
+        <${Entries} group=${group} onEntry=${onEntry} onDelete=${onDelete} />
       </section>
       <div class="col-right" ref=${colRef}>
       <section class=${'panel p-debts' + (tab === 'debts' ? ' on' : '')}>
@@ -562,7 +613,7 @@ function GroupView({ group, onBack, onEdit, onShare, onEntry, onAdd, onPay, onQr
   `;
 }
 
-function Entries({ group, onEntry }) {
+function Entries({ group, onEntry, onDelete }) {
   const cur = group.currency;
   if (!group.entries.length) {
     return html`<div class="empty"><div class="big">💸</div><p>Zatím žádné výdaje.<br />Přidej první tlačítkem +.</p></div>`;
@@ -586,6 +637,7 @@ function Entries({ group, onEntry }) {
           const moved = e.mvd === 'in';
           const paid = !e.mv && (!e.title || e.title === 'Převod' || /vyrovn|uhra[zd]/i.test(e.title));
           return html`
+            <${SwipeRow} onDelete=${() => onDelete(e)}>
             <button class="item" onClick=${() => onEntry(e)}>
               <span class="avatar sm">${e.mv ? '🔀' : '💱'}</span>
               <span class="grow">
@@ -597,11 +649,13 @@ function Entries({ group, onEntry }) {
                 <small><${Balance} cents=${mineT} currency=${cur} zero="netýká se tě" /></small>
               </span>
             </button>
+            <//>
           `;
         }
         const inc = e.kind === 'income';
         const mine = (inc ? -1 : 1) * ((e.paidBy === group.me ? base : 0) - (shares(e)[group.me] || 0));
         return html`
+          <${SwipeRow} onDelete=${() => onDelete(e)}>
           <button class="item" onClick=${() => onEntry(e)}>
             <span class="avatar sm">${inc ? '💰' : cat(catOf(e)).e}</span>
             <span class="grow">
@@ -613,6 +667,7 @@ function Entries({ group, onEntry }) {
               <small><${Balance} cents=${mine} currency=${cur} zero="netýká se tě" /></small>
             </span>
           </button>
+          <//>
         `;
       })}
     </div>
@@ -1566,6 +1621,25 @@ function App({ user, recovery }) {
 
   const group = groups.find((g) => g.id === gid);
   const close = () => setSheet(null);
+  // Dotyk: tažení od levého okraje doprava = zpět (zavře okno, jinak se vrátí na seznam skupin).
+  const sheetRef = useRef(sheet);
+  sheetRef.current = sheet;
+  useEffect(() => {
+    let st = null;
+    const start = (e) => { const t = e.touches[0]; st = t.clientX <= 26 ? { x: t.clientX, y: t.clientY } : null; };
+    const end = (e) => {
+      if (!st) return;
+      const t = e.changedTouches[0];
+      const dx = t.clientX - st.x, dy = Math.abs(t.clientY - st.y);
+      st = null;
+      if (dx < 80 || dy > 70) return;
+      if (sheetRef.current) setSheet(null);
+      else if (gidRef.current) setGid(null);
+    };
+    document.addEventListener('touchstart', start, { passive: true });
+    document.addEventListener('touchend', end, { passive: true });
+    return () => { document.removeEventListener('touchstart', start); document.removeEventListener('touchend', end); };
+  }, []);
   // Klávesové zkratky pro hledání: „/“ nebo Ctrl/Cmd + K (když se zrovna nepíše do pole).
   useEffect(() => {
     const key = (e) => {
@@ -1911,6 +1985,7 @@ function App({ user, recovery }) {
             onAdd=${() => setSheet({ type: 'entry' })}
             onEntry=${(entry) => setSheet({ type: 'entry', entry })}
             onSearch=${() => setSheet({ type: 'search' })}
+            onDelete=${(entry) => deleteEntry(entry.id)}
             onQr=${openQr}
             onMove=${groups.length > 1 ? (pay) => setSheet({ type: 'move', pay }) : null}
             onPay=${payDebt} />`

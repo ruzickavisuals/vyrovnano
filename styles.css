@@ -627,3 +627,27 @@ mark { background: color-mix(in srgb, var(--accent) 28%, transparent); color: in
 .group-row .group-card { cursor: pointer; }
 .is-dragging .group-row { transition: transform 0.18s ease; }
 .group-row.dragging .group-card { outline: 2px solid var(--g); outline-offset: -2px; opacity: 1; box-shadow: 0 14px 34px rgb(0 0 0 / 0.38); cursor: grabbing; }
+
+/* ---------- Dotyková gesta ---------- */
+.grabber { display: none; }
+.swipe { position: relative; overflow: hidden; }
+.swipe-bg { display: none; }
+.swipe-fg { background: var(--card); touch-action: pan-y; }
+.list > .swipe:first-child, .list > .swipe:first-child .swipe-fg { border-radius: var(--radius) var(--radius) 0 0; }
+.list > .swipe:last-child, .list > .swipe:last-child .swipe-fg { border-radius: 0 0 var(--radius) var(--radius); }
+.list > .swipe:only-child, .list > .swipe:only-child .swipe-fg { border-radius: var(--radius); }
+.swipe.swiping .swipe-bg {
+  display: flex; align-items: center; justify-content: flex-end; position: absolute; inset: 0; padding-right: 22px;
+  background: color-mix(in srgb, var(--neg) 55%, var(--card)); color: #fff; font-weight: 700; font-size: 14px;
+}
+.swipe.armed .swipe-bg { background: var(--neg); }
+.swipe:not(.swiping) .swipe-fg { transition: transform 0.2s ease; }
+.sheet:not(.pulling) { transition: transform 0.22s ease; }
+@media (max-width: 899px) {
+  /* Na dotykové obrazovce se pořadí mění tažením a okna zavírají gestem, takže tyhle prvky nejsou potřeba. */
+  .list-tools { display: none; }
+  .sheet-head { position: relative; touch-action: none; }
+  .grabber { display: block; position: absolute; top: calc(env(safe-area-inset-top) + 6px); left: 50%; width: 40px; height: 4px; margin-left: -20px; border-radius: 2px; background: var(--line); }
+  .sheet.pulling { box-shadow: 0 -12px 40px rgb(0 0 0 / 0.5); }
+  .overlay:has(.sheet.pulling) { background: color-mix(in srgb, var(--bg) 70%, transparent); }
+}
