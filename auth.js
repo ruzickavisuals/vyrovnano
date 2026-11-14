@@ -125,7 +125,12 @@ export async function consumeUrl() {
   const at = h.get('access_token'), rt = h.get('refresh_token');
   if (h.get('error') || h.get('error_code')) {
     history.replaceState(null, '', location.pathname);
-    return { error: 'Odkaz je neplatný nebo už vypršel. Zkus to prosím znovu.' };
+    // Vypršelý odkaz z e-mailu vs. nedokončené přihlášení přes jinou službu (např. Google).
+    return {
+      error: h.get('error_code') === 'otp_expired'
+        ? 'Odkaz je neplatný nebo už vypršel. Zkus to prosím znovu.'
+        : 'Přihlášení přes Google se nepodařilo dokončit. Zkus to prosím znovu nebo se přihlas e-mailem a heslem.',
+    };
   }
   if (!at || !rt) return {};
   history.replaceState(null, '', location.pathname);
