@@ -52,6 +52,18 @@ function Logo() {
     </picture>`;
 }
 
+// Linkové ikony pro spodní lištu a vyhledávání.
+const ICONS = {
+  home: 'M4 11l8-7 8 7M6 10v9h12v-9',
+  search: 'M11 18a7 7 0 1 0 0-14 7 7 0 0 0 0 14zM20 20l-4-4',
+  plus: 'M12 5v14M5 12h14',
+  user: 'M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM5 20a7 7 0 0 1 14 0',
+};
+function Icon({ name, size = 22 }) {
+  return html`<svg class="ic" width=${size} height=${size} viewBox="0 0 24 24" fill="none" stroke="currentColor"
+    stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d=${ICONS[name]} /></svg>`;
+}
+
 /* ---------- Drobné stavební prvky ---------- */
 
 function Sheet({ title, onClose, children }) {
@@ -293,7 +305,7 @@ function EmojiPicker({ value, onChange }) {
 
 /* ---------- Domovská obrazovka ---------- */
 
-function Home({ groups, profile, account, activeId, onOpen, onNew, onProfile, onReorder, onSortByName }) {
+function Home({ groups, profile, account, activeId, onOpen, onNew, onProfile, onReorder, onSortByName, onSearch }) {
   // Přetažení skupiny za úchyt: funguje myší i prstem. Pořadí se mění průběžně podle toho,
   // nad kterou kartou se ukazatel právě nachází.
   const [drag, setDrag] = useState(null);
@@ -334,6 +346,7 @@ function Home({ groups, profile, account, activeId, onOpen, onNew, onProfile, on
       `}
       ${groups.length > 1 && html`
         <div class="list-tools">
+          <button class="search-btn only-wide" onClick=${onSearch}><${Icon} name="search" size=${16} /> Hledat <kbd>/</kbd></button>
           <button class="link-btn" onClick=${onSortByName}>Seřadit podle názvu</button>
         </div>`}
       <div class="group-list" ref=${listRef}>
@@ -410,7 +423,7 @@ function Welcome({ groups, name }) {
 
 /* ---------- Detail skupiny ---------- */
 
-function GroupView({ group, onBack, onEdit, onShare, onEntry, onAdd, onPay, onQr, onMove }) {
+function GroupView({ group, onBack, onEdit, onShare, onEntry, onAdd, onPay, onQr, onMove, onSearch }) {
   const [tab, setTab] = useState('entries');
   const bal = useMemo(() => balances(group), [group]);
   const st = useMemo(() => stats(group), [group]);
@@ -440,6 +453,7 @@ function GroupView({ group, onBack, onEdit, onShare, onEntry, onAdd, onPay, onQr
       <div class="row">
         <button class="icon-btn back" onClick=${onBack} aria-label="Zpět">‹</button>
         <h1 class="grow">${group.emoji} ${group.name}</h1>
+        <button class="icon-btn only-wide" onClick=${onSearch} aria-label="Hledat ve skupině" title="Hledat (klávesa /)"><${Icon} name="search" size=${18} /></button>
         <button class="icon-btn" onClick=${onShare} aria-label="Sdílet skupinu">🔗</button>
         <button class="icon-btn" onClick=${onEdit} aria-label="Upravit skupinu">⚙︎</button>
       </div>
@@ -985,6 +999,132 @@ function WhoSheet({ group, profile, known, onPick }) {
   `;
 }
 
+/* ---------- Vyhledávání ---------- */
+
+const MONTHS = ['leden', 'unor', 'brezen', 'duben', 'kveten', 'cerven', 'cervenec', 'srpen', 'zari', 'rijen', 'listopad', 'prosinec'];
+const KIND_WORDS = { expense: 'vydaj utrata', income: 'prijem', transfer: 'prevod platba uhrazeno vyrovnani' };
+
+// Jedna prohledávatelná položka = jeden záznam se vším, podle čeho ho člověk může hledat.
+function searchIndex(groups) {
+  const out = [];
+  for (const g of groups) {
+    for (const e of g.entries) {
+      const d = new Date(e.date + 'T12:00:00');
+      const people = [e.paidBy, ...Object.keys(e.parts)].map((id) => nameOf(g, id)).join(' ');
+      const dates = `${d.getDate()}.${d.getMonth() + 1}.${d.getFullYear()} ${d.getDate()}. ${d.getMonth() + 1}. ${d.getFullYear()} ${MONTHS[d.getMonth()]} ${e.date}`;
+      out.push({
+        g, e, base: baseAmount(e),
+        hay: fold(`${e.title} ${e.kind === 'expense' ? cat(catOf(e)).n : ''} ${people} ${KIND_WORDS[e.kind] || ''} ${e.mv ? 'prevedeny dluh' : ''} ${g.name} ${e.currency}`),
+        dates: fold(dates),
+      });
+    }
+  }
+  return out.sort((a, b) => (a.e.date < b.e.date ? 1 : a.e.date > b.e.date ? -1 : (b.e.u || 0) - (a.e.u || 0)));
+}
+
+// Jedno slovo dotazu: text, částka (706 nebo 706,5), porovnání (>500, <100) nebo datum (11.11., 2026, listopad).
+function matchToken(it, t) {
+  const cmp = t.match(/^([<>])=?(\d+(?:[.,]\d+)?)$/);
+  if (cmp) {
+    const n = parseFloat(cmp[2].replace(',', '.')) * 100;
+    return cmp[1] === '>' ? it.base > n : it.base < n;
+  }
+  if (/^\d+(?:[.,]\d*)?$/.test(t)) {
+    const [whole, dec] = t.split(/[.,]/);
+    const hit = (cents) => String(Math.floor(cents / 100)) === whole && (!dec || String(cents % 100).padStart(2, '0').startsWith(dec));
+    return hit(it.base) || hit(it.e.amount) || it.dates.includes(t);
+  }
+  return it.hay.includes(t) || it.dates.includes(t);
+}
+
+// Zvýrazní v textu části odpovídající hledaným slovům (bez ohledu na diakritiku a velikost písmen).
+function Marked({ text, tokens }) {
+  const chars = [...String(text)];
+  const folded = chars.map((c) => fold(c) || c);
+  const on = new Array(chars.length).fill(false);
+  const flat = folded.join('');
+  if (flat.length === chars.length) {
+    for (const t of tokens) {
+      if (t.length < 2 || /^[<>\d]/.test(t)) continue;
+      for (let i = flat.indexOf(t); i >= 0; i = flat.indexOf(t, i + 1)) on.fill(true, i, i + t.length);
+    }
+  }
+  const parts = [];
+  for (let i = 0; i < chars.length; i++) {
+    const last = parts[parts.length - 1];
+    if (last && last.on === on[i]) last.s += chars[i];
+    else parts.push({ on: on[i], s: chars[i] });
+  }
+  return parts.map((p) => (p.on ? html`<mark>${p.s}</mark>` : p.s));
+}
+
+function SearchSheet({ groups, scopeName, onOpen }) {
+  const [q, setQ] = useState('');
+  const inputRef = useRef();
+  useEffect(() => { inputRef.current && inputRef.current.focus(); }, []);
+  const index = useMemo(() => searchIndex(groups), [groups]);
+  const tokens = fold(q).split(/\s+/).filter(Boolean);
+  const found = tokens.length ? index.filter((it) => tokens.every((t) => matchToken(it, t))) : [];
+  const many = groups.length > 1;
+
+  // Součet nalezených výdajů (bez převodů), zvlášť pro každou měnu.
+  const sums = {};
+  for (const it of found) if (it.e.kind === 'expense') sums[it.g.currency] = (sums[it.g.currency] || 0) + it.base;
+
+  // Rychlé návrhy: nejčastější kategorie v prohledávaných skupinách + pár užitečných filtrů.
+  const tips = useMemo(() => {
+    const count = {};
+    for (const it of index) if (it.e.kind === 'expense') { const c = catOf(it.e); if (c !== 'other') count[c] = (count[c] || 0) + 1; }
+    const cats = Object.keys(count).sort((a, b) => count[b] - count[a]).slice(0, 5).map((id) => [`${cat(id).e} ${cat(id).n}`, cat(id).n]);
+    return [...cats, ['💰 Příjmy', 'příjem'], ['💱 Převody', 'převod'], ['Nad 1 000', '>1000'], [String(new Date().getFullYear()), String(new Date().getFullYear())]];
+  }, [index]);
+
+  return html`
+    <div class="form search">
+      <div class="search-box">
+        <${Icon} name="search" size=${18} />
+        <input ref=${inputRef} value=${q} placeholder="Název, částka, člověk, kategorie, datum…" aria-label="Hledat"
+          enterkeyhint="search" autocomplete="off" autocapitalize="off" onInput=${(e) => setQ(e.target.value)} />
+        ${q && html`<button type="button" class="search-clear" aria-label="Smazat hledání" onClick=${() => { setQ(''); inputRef.current.focus(); }}>✕</button>`}
+      </div>
+      <p class="hint">Hledám ${many ? 've všech skupinách' : `ve skupině ${scopeName}`}. Slova můžeš kombinovat, třeba „internet michal 2026“ nebo „kafe >300“.</p>
+
+      ${!tokens.length && html`
+        <div class="chips">
+          ${tips.map(([label, value]) => html`<button type="button" class="chip" onClick=${() => setQ(value)}>${label}</button>`)}
+        </div>`}
+
+      ${tokens.length > 0 && html`
+        <div class="search-sum">
+          <strong>${found.length === 0 ? 'Nic nenalezeno' : found.length === 1 ? '1 záznam' : found.length < 5 ? `${found.length} záznamy` : `${found.length} záznamů`}</strong>
+          ${Object.entries(sums).map(([c, v]) => html`<span class="muted">výdaje celkem <strong>${fmt(v, c)}</strong></span>`)}
+        </div>`}
+
+      ${found.length > 0 && html`
+        <div class="card list">
+          ${found.slice(0, 80).map((it) => {
+            const { e, g } = it;
+            const to = Object.keys(e.parts)[0];
+            const title = e.kind === 'transfer'
+              ? (e.mvd === 'in' ? `${nameOf(g, to)} dluží ${nameOf(g, e.paidBy)}` : `${nameOf(g, e.paidBy)} → ${nameOf(g, to)}`)
+              : e.title;
+            const sub = e.kind === 'transfer' ? e.title : `${e.kind === 'income' ? 'přijal(a)' : 'platil(a)'} ${nameOf(g, e.paidBy)}`;
+            return html`
+              <button class="item" onClick=${() => onOpen(g.id, e)}>
+                <span class="avatar sm">${e.kind === 'transfer' ? (e.mv ? '🔀' : '💱') : e.kind === 'income' ? '💰' : cat(catOf(e)).e}</span>
+                <span class="grow">
+                  <strong><${Marked} text=${title} tokens=${tokens} /></strong>
+                  <small class="muted"><${Marked} text=${`${dateLabel(e.date)} · ${sub}${many ? ` · ${g.name}` : ''}`} tokens=${tokens} /></small>
+                </span>
+                <span class="right"><strong>${e.kind === 'income' ? '+' : ''}${fmt(it.base, g.currency)}</strong></span>
+              </button>`;
+          })}
+        </div>
+        ${found.length > 80 && html`<p class="hint center">Zobrazuji prvních 80. Upřesni hledání a uvidíš zbytek.</p>`}`}
+    </div>
+  `;
+}
+
 /* ---------- Převod dluhu do jiné skupiny ---------- */
 
 // Najde ve skupině člena odpovídajícího danému členovi jiné skupiny: nejdřív podle
@@ -1239,6 +1379,8 @@ function App({ user, recovery }) {
   }, []);
   const ref = useRef(groups);
   ref.current = groups;
+  const gidRef = useRef(gid);
+  gidRef.current = gid;
   const busy = useRef({});
   const synced = useRef({});
   const leaving = useRef(false);
@@ -1248,6 +1390,18 @@ function App({ user, recovery }) {
 
   const group = groups.find((g) => g.id === gid);
   const close = () => setSheet(null);
+  // Klávesové zkratky pro hledání: „/“ nebo Ctrl/Cmd + K (když se zrovna nepíše do pole).
+  useEffect(() => {
+    const key = (e) => {
+      const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName);
+      if ((e.key === '/' && !typing) || (e.key.toLowerCase() === 'k' && (e.metaKey || e.ctrlKey))) {
+        e.preventDefault();
+        setSheet((cur) => (cur ? cur : { type: 'search', all: !ref.current.some((g) => g.id === gidRef.current) }));
+      }
+    };
+    document.addEventListener('keydown', key);
+    return () => document.removeEventListener('keydown', key);
+  }, []);
   // S účtem se „kdo jsem já“ neukládá do zařízení, ale pozná se podle účtu propojeného se členem.
   const withMe = (g) => (user ? { ...g, me: g.members.find((m) => m.uid === user.id)?.id ?? null } : g);
   const prof = { ...profile, name: profile.name || (user ? user.name || user.email.split('@')[0] : '') };
@@ -1556,6 +1710,7 @@ function App({ user, recovery }) {
         <aside class=${'side' + (group ? ' has-group' : '')}>
           <${Home} groups=${groups} profile=${prof} account=${!!user} activeId=${gid} onOpen=${setGid}
             onNew=${() => setSheet({ type: 'group' })} onProfile=${() => setSheet({ type: 'profile' })}
+            onSearch=${() => setSheet({ type: 'search', all: true })}
             onReorder=${(from, to) => setGroups((gs) => { const a = [...gs]; const [x] = a.splice(from, 1); a.splice(to, 0, x); return a; })}
             onSortByName=${() => setGroups((gs) => [...gs].sort((a, b) => a.name.localeCompare(b.name, 'cs', { sensitivity: 'base' })))} />
         </aside>
@@ -1567,12 +1722,22 @@ function App({ user, recovery }) {
             onShare=${() => setSheet({ type: 'share' })}
             onAdd=${() => setSheet({ type: 'entry' })}
             onEntry=${(entry) => setSheet({ type: 'entry', entry })}
+            onSearch=${() => setSheet({ type: 'search' })}
             onQr=${openQr}
             onMove=${groups.length > 1 ? (pay) => setSheet({ type: 'move', pay }) : null}
             onPay=${payDebt} />`
             : html`<${Welcome} groups=${groups} name=${prof.name} />`}
         </section>
       </div>
+
+      <nav class="tabbar" aria-label="Hlavní nabídka">
+        <button class=${!group && !sheet ? 'on' : ''} onClick=${() => { close(); setGid(null); }}><${Icon} name="home" /><span>Skupiny</span></button>
+        <button class=${sheet?.type === 'search' ? 'on' : ''} onClick=${() => setSheet({ type: 'search', all: !group })}><${Icon} name="search" /><span>Hledat</span></button>
+        <button class="add" onClick=${() => setSheet(group ? { type: 'entry' } : { type: 'group' })}>
+          <span class="plus"><${Icon} name="plus" size=${24} /></span><span>${group ? 'Přidat' : 'Nová skupina'}</span>
+        </button>
+        <button class=${sheet?.type === 'profile' ? 'on' : ''} onClick=${() => setSheet({ type: 'profile' })}><${Icon} name="user" /><span>Profil</span></button>
+      </nav>
 
       ${sheet?.type === 'group' && html`
         <${Sheet} title=${sheet.group ? 'Upravit skupinu' : 'Nová skupina'} onClose=${close}>
@@ -1586,6 +1751,11 @@ function App({ user, recovery }) {
             ? html`<${MovedInfo} group=${group} entry=${sheet.entry} other=${groups.find((g) => g.id === sheet.entry.mvg)}
                 onDelete=${() => deleteEntry(sheet.entry.id)} />`
             : html`<${EntryForm} group=${group} entry=${sheet.entry} onSave=${saveEntry} onDelete=${() => deleteEntry(sheet.entry.id)} />`}
+        <//>`}
+      ${sheet?.type === 'search' && html`
+        <${Sheet} title="Hledat" onClose=${close}>
+          <${SearchSheet} groups=${sheet.all || !group ? groups : [group]} scopeName=${group?.name}
+            onOpen=${(id, entry) => { setGid(id); setSheet({ type: 'entry', entry }); }} />
         <//>`}
       ${sheet?.type === 'move' && group && html`
         <${Sheet} title="Převést dluh" onClose=${close}>
@@ -1642,6 +1812,11 @@ function Root() {
 }
 
 render(html`<${Root} />`, document.getElementById('root'));
+
+// Telefon: aplikace se nemá zvětšovat štípnutím ani dvojím klepnutím, stejně jako nativní.
+for (const type of ['gesturestart', 'gesturechange', 'gestureend']) {
+  document.addEventListener(type, (e) => e.preventDefault(), { passive: false });
+}
 
 if ('serviceWorker' in navigator && !['localhost', '127.0.0.1'].includes(location.hostname)) {
   navigator.serviceWorker.register('./sw.js').catch(() => {});

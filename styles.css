@@ -454,3 +454,42 @@ input.emoji-search { margin-bottom: 8px; padding: 9px 12px !important; }
 .welcome-sum { font-size: 17px; color: var(--text); }
 .welcome-quip { max-width: 440px; font-size: 16px; line-height: 1.5; color: var(--muted); font-style: italic; margin-top: 10px; }
 .welcome-hint { font-size: 13px; margin-top: 18px; }
+
+/* ---------- Telefon: bez zvětšování, spodní lišta ---------- */
+html { touch-action: pan-x pan-y; -webkit-text-size-adjust: 100%; }
+.tabbar { display: none; }
+.only-wide { display: none; }
+.ic { display: block; flex-shrink: 0; }
+@media (min-width: 900px) { .only-wide { display: inline-flex; } .icon-btn.only-wide { display: grid; } }
+@media (max-width: 899px) {
+  /* Pole menší než 16 px by iPhone při psaní sám přiblížil. */
+  input, .select-btn, input.mini, .member .iban { font-size: 16px !important; }
+  .tabbar {
+    display: grid; grid-template-columns: repeat(4, 1fr); align-items: end;
+    position: fixed; left: 50%; bottom: 0; transform: translateX(-50%); width: 100%; max-width: 520px; z-index: 10;
+    padding: 8px 8px calc(env(safe-area-inset-bottom) + 6px);
+    background: color-mix(in srgb, var(--bg) 88%, transparent); -webkit-backdrop-filter: blur(16px); backdrop-filter: blur(16px);
+    border-top: 1px solid var(--line);
+  }
+  .tabbar button { display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 4px 0; font-size: 11px; font-weight: 600; color: var(--muted); }
+  .tabbar button.on { color: var(--accent); }
+  .tabbar .add { color: var(--text); }
+  .tabbar .plus { width: 46px; height: 46px; margin-top: -22px; border-radius: 50%; background: var(--accent); color: var(--on-accent);
+    display: grid; place-items: center; box-shadow: 0 6px 16px rgb(0 0 0 / 0.28); }
+  .fab { display: none; }
+  main, main.with-fab { padding-bottom: calc(env(safe-area-inset-bottom) + 104px); }
+}
+
+/* ---------- Vyhledávání ---------- */
+.search-btn { align-items: center; gap: 6px; padding: 6px 10px; border-radius: 10px; background: var(--card); border: 1px solid var(--line); color: var(--muted); font-size: 13px; font-weight: 600; }
+.search-btn:hover { color: var(--text); }
+kbd { font: inherit; font-size: 11px; padding: 0 5px; border-radius: 5px; border: 1px solid var(--line); color: var(--muted); }
+.list-tools { justify-content: space-between; }
+.search-box { display: flex; align-items: center; gap: 10px; padding: 0 12px; background: var(--card); border: 1px solid var(--line); border-radius: 14px; color: var(--muted); }
+.search-box:focus-within { border-color: var(--accent); color: var(--accent); }
+.search-box input { border: 0 !important; background: transparent !important; padding: 13px 0 !important; outline: none; color: var(--text); font-size: 17px; }
+.search-clear { width: 26px; height: 26px; border-radius: 50%; background: var(--line); color: var(--text); font-size: 12px; text-align: center; flex-shrink: 0; }
+.search-sum { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 0 4px; }
+.search .hint { margin-top: -6px; }
+mark { background: color-mix(in srgb, var(--accent) 28%, transparent); color: inherit; border-radius: 4px; padding: 0 1px; }
+@media (min-width: 900px) { .sheet:has(.search) { max-width: 640px; align-self: flex-start; margin-top: 8vh; } }
