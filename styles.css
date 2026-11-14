@@ -436,3 +436,9 @@ input.emoji-search { margin-bottom: 8px; padding: 9px 12px !important; }
 /* Oba boční sloupce stejně široké, aby částka seděla přesně uprostřed boxu. */
 .pay { grid-template-columns: clamp(72px, 24%, 104px) minmax(0, 1fr) clamp(72px, 24%, 104px); }
 .pay-who { max-width: none; overflow-wrap: anywhere; }
+
+/* Logo v záhlaví */
+.brand { margin: 0; line-height: 0; }
+.logo img { height: 38px; width: auto; display: block; }
+.auth .top { padding-top: calc(env(safe-area-inset-top) + 36px); padding-bottom: 20px; }
+.auth .logo img { height: 46px; }

@@ -43,6 +43,15 @@ function firstEmoji(text) {
 }
 const nameOf = (g, id) => g.members.find((m) => m.id === id)?.name || '?';
 
+// Logo aplikace; varianta se volí podle světlého/tmavého režimu.
+function Logo() {
+  return html`
+    <picture class="logo">
+      <source srcset="brand/logo-dark.svg" media="(prefers-color-scheme: dark)" />
+      <img src="brand/logo-light.svg" alt="Vyrovnáno" width="590" height="116" />
+    </picture>`;
+}
+
 /* ---------- Drobné stavební prvky ---------- */
 
 function Sheet({ title, onClose, children }) {
@@ -310,8 +319,7 @@ function Home({ groups, profile, account, activeId, onOpen, onNew, onProfile, on
   return html`
     <header class="top row">
       <div class="grow">
-        <h1>Vyrovnáno</h1>
-        <p class="muted">Společné výdaje bez počítání</p>
+        <h1 class="brand"><${Logo} /></h1>
       </div>
       <button class="ava-btn" onClick=${onProfile} aria-label="Můj profil">
         <${Avatar} m=${{ id: 'me', name: profile.name || '🙂', avatar: profile.avatar }} size=${44} />
@@ -342,7 +350,7 @@ function Home({ groups, profile, account, activeId, onOpen, onNew, onProfile, on
             <span class="grow">
               <strong>${g.name}</strong>
               <small class="muted">${g.members.filter((m) => !m.inactive).length} lidí${g.members.filter((m) => m.uid).length > 1 ? ' · sdílená' : ''}${account && !g.remote ? ' · čeká na odeslání' : ''}</small>
-              <small class="muted">${total < 0 ? 'příjem ' + fmt(-total, g.currency) : 'utraceno ' + fmt(total, g.currency)}</small>
+              <small class="muted">${total < 0 ? 'příjem ' : 'utraceno '}${fmt(Math.round(Math.abs(total) / 100) * 100, g.currency)}</small>
             </span>
             <span class="right">
               <small class="muted">${my > 0 ? 'dostaneš' : my < 0 ? 'dlužíš' : ''}</small>
@@ -1070,8 +1078,7 @@ function AuthScreen({ notice }) {
   return html`
     <div class="app auth">
       <header class="top">
-        <h1>Vyrovnáno</h1>
-        <p class="muted">Společné výdaje bez počítání</p>
+        <h1 class="brand"><${Logo} /></h1>
       </header>
       <main>
         ${mode !== 'forgot' && html`<${Seg} value=${mode} onChange=${(m) => { setMode(m); setMsg(''); }} options=${[['in', 'Přihlášení'], ['up', 'Nový účet']]} />`}
