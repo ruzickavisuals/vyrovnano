@@ -341,7 +341,8 @@ function Home({ groups, profile, account, activeId, onOpen, onNew, onProfile, on
             <span class="avatar">${g.emoji}</span>
             <span class="grow">
               <strong>${g.name}</strong>
-              <small class="muted">${g.members.filter((m) => !m.inactive).length} lidí · ${total < 0 ? 'čistý příjem ' + fmt(-total, g.currency) : 'utraceno ' + fmt(total, g.currency)}${g.members.filter((m) => m.uid).length > 1 ? ' · sdílená' : ''}${account && !g.remote ? ' · čeká na odeslání' : ''}</small>
+              <small class="muted">${g.members.filter((m) => !m.inactive).length} lidí${g.members.filter((m) => m.uid).length > 1 ? ' · sdílená' : ''}${account && !g.remote ? ' · čeká na odeslání' : ''}</small>
+              <small class="muted">${total < 0 ? 'příjem ' + fmt(-total, g.currency) : 'utraceno ' + fmt(total, g.currency)}</small>
             </span>
             <span class="right">
               <small class="muted">${my > 0 ? 'dostaneš' : my < 0 ? 'dlužíš' : ''}</small>
@@ -445,7 +446,7 @@ function Entries({ group, onEntry }) {
               <span class="avatar sm">💱</span>
               <span class="grow">
                 <strong>${nameOf(group, e.paidBy)} → ${nameOf(group, to)}</strong>
-                <small class="muted">vyrovnání dluhu</small>
+                <small><span class="paid-tag">uhrazeno</span></small>
               </span>
               <span class="right"><strong>${fmt(e.amount, e.currency)}</strong></span>
             </button>
@@ -479,7 +480,7 @@ function Debts({ group, bal, onPay, onQr }) {
     <h2 class="panel-title">Dluhy</h2>
     <h3 class="day">Jak se vyrovnat</h3>
     ${plan.length === 0
-      ? html`<div class="card pad center">🎉 Všichni jsou vyrovnaní.</div>`
+      ? html`<div class="card pad center settled">✓ Všichni jsou vyrovnaní, nikdo nikomu nic nedluží.</div>`
       : html`
         <div class="card list">
           ${plan.map((p) => {
@@ -493,13 +494,14 @@ function Debts({ group, bal, onPay, onQr }) {
                 </div>
                 <div class="pay-actions">
                   <button class="btn small" onClick=${() => onQr({ ...p, iban })}>QR platba</button>
-                  <button class="btn small primary" onClick=${() => onPay(p)}>Zaplaceno</button>
+                  <button class="btn small pay" onClick=${() => onPay(p)}>Uhradit</button>
                 </div>
               </div>
             `;
           })}
         </div>
-        <p class="hint">Nejmenší možný počet plateb: ${plan.length}. „Zaplaceno“ zapíše převod a dluh zmizí.</p>
+        <p class="hint">Dluhy jsou přepočítané tak, aby se celá skupina vyrovnala co nejmenším počtem plateb (teď ${plan.length}).
+          Až peníze pošleš, klepni na „Uhradit“: platba se zapíše do historie a dluh ze seznamu zmizí.</p>
       `}
     <h3 class="day">Zůstatky</h3>
     <div class="card pad">
@@ -835,7 +837,7 @@ function QrSheet({ group, pay, onPaid }) {
       <div class="qr-amount">${fmt(pay.amount, group.currency)}</div>
       <${Qr} alt="QR platba" text=${spayd(pay.iban, pay.amount, group.currency, `${group.name} - ${nameOf(group, pay.from)}`)} />
       <p class="hint">Naskenuj v bankovní aplikaci; částka i účet se vyplní samy. Účet: ${pay.iban}</p>
-      <button class="btn primary wide" onClick=${onPaid}>Zaplaceno, zapsat převod</button>
+      <button class="btn paid wide" onClick=${onPaid}>Uhrazeno, zapsat platbu</button>
     </div>
   `;
 }
@@ -1263,8 +1265,8 @@ function App({ user, recovery }) {
     putGroup({ ...group, entries: group.entries.filter((x) => x.id !== id), dead: { ...(group.dead || {}), [id]: Date.now() } });
   }
   async function payDebt(p) {
-    const msg = `Zapsat, že ${nameOf(group, p.from)} zaplatil(a) ${fmt(p.amount, group.currency)} pro ${nameOf(group, p.to)}? Dluh tím zmizí všem členům.`;
-    if (!(await ask(msg, { ok: 'Zapsat platbu' }))) return;
+    const msg = `Označit dluh jako uhrazený? ${nameOf(group, p.from)} → ${nameOf(group, p.to)}, ${fmt(p.amount, group.currency)}. Peníze tím nikam neodejdou, jen se platba zapíše do historie a dluh zmizí všem členům.`;
+    if (!(await ask(msg, { ok: 'Uhrazeno' }))) return;
     saveEntry({
       id: uid(), kind: 'transfer', title: 'Převod', amount: p.amount, currency: group.currency, rate: 1,
       paidBy: p.from, mode: 'equal', parts: { [p.to]: 1 }, category: 'other', date: today(),

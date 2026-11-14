@@ -365,24 +365,23 @@ input.emoji-input { width: 104px !important; padding: 5px 10px !important; borde
 
 /* Karta skupiny v seznamu: barevný proužek, jemný přechod a podbarvená ikona. */
 .group-row .group-card {
-  border-left: 4px solid var(--g);
-  background: linear-gradient(115deg, color-mix(in srgb, var(--g) 13%, var(--card)), var(--card) 58%);
+  background: linear-gradient(115deg, color-mix(in srgb, var(--g) 16%, var(--card)), var(--card) 62%);
 }
 .group-row .avatar { background: color-mix(in srgb, var(--g) 22%, var(--card)); }
 .group-row .group-card.active { outline-color: var(--g); }
 
-/* Uvnitř skupiny přebírá barvu skupiny vše, co nese akcent: tlačítka, pruhy, štítky. */
-.main-pane { --accent: var(--g); --accent-soft: color-mix(in srgb, var(--g) 16%, var(--card)); }
+/* Barva skupiny se projeví jen na její kartě v seznamu a v horním souhrnném boxu.
+   Tlačítka a ostatní prvky mají v celé aplikaci stejné barvy. */
 .hero {
-  background: linear-gradient(120deg, color-mix(in srgb, var(--accent) 20%, var(--card)), var(--card) 68%);
-  border: 1px solid color-mix(in srgb, var(--accent) 26%, transparent);
+  background: linear-gradient(120deg, color-mix(in srgb, var(--g) 20%, var(--card)), var(--card) 68%);
+  border: 1px solid color-mix(in srgb, var(--g) 26%, transparent);
 }
 .panel-title { align-items: center; gap: 10px; }
 .panel-title::before { content: ''; width: 4px; height: 18px; border-radius: 2px; background: var(--accent); }
 @media (min-width: 1200px) { .panel-title { display: flex; } }
 .main-pane .day { display: flex; align-items: center; gap: 8px; }
 .main-pane .card { border: 1px solid color-mix(in srgb, var(--line) 80%, transparent); }
-.pay-mid .arrow { color: var(--accent); }
+
 
 /* Výběr barvy */
 .swatches { display: flex; flex-wrap: wrap; gap: 10px; }
@@ -400,3 +399,14 @@ input.emoji-search { margin-bottom: 8px; padding: 9px 12px !important; }
 .emoji-cell:hover, .emoji-cell:focus-visible { background: var(--line); }
 .emoji-cell.on { background: var(--accent-soft); box-shadow: inset 0 0 0 1.5px var(--accent); }
 .emoji-none { padding: 16px 4px; font-size: 14px; }
+
+/* Karty skupin: vždy stejná výška – název a dva řádky údajů, nic se nezalamuje. */
+.group-card strong, .group-card small { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; -webkit-line-clamp: unset; }
+.group-card .right small { overflow: visible; }
+
+/* Platby: neuhrazený dluh svítí červeně, uhrazené zeleně. */
+.btn.pay { background: var(--neg); color: var(--on-accent); }
+.btn.paid { background: var(--pos); color: var(--on-accent); }
+.paid-tag { display: inline-block; font-size: 11px; font-weight: 700; letter-spacing: 0.03em; text-transform: uppercase;
+  color: var(--pos); background: color-mix(in srgb, var(--pos) 16%, transparent); padding: 2px 7px; border-radius: 6px; }
+.settled { color: var(--pos); font-weight: 600; background: color-mix(in srgb, var(--pos) 10%, var(--card)); }
