@@ -366,6 +366,48 @@ function Home({ groups, profile, account, activeId, onOpen, onNew, onProfile, on
   `;
 }
 
+/* ---------- Úvodní plocha (když není vybraná skupina) ---------- */
+
+const QUIPS = [
+  ['🤝', 'Dobré účty dělají dobré přátele. Špatné účty dělají dlouhé skupinové chaty.'],
+  ['💸', '„Pošlu ti to večer.“ Nejčastější lež hned po „už jsem na cestě“.'],
+  ['🧾', '„Účet dohromady, rozpočítáme si to potom.“ Slavná poslední slova.'],
+  ['🧠', 'Kdo platí, ten si pamatuje. Kdo dluží, zapomíná. Proto jsme tady.'],
+  ['🍻', 'Přátelství se pozná podle toho, kdo zaplatí první kolo. A kdo ho sem zapíše.'],
+  ['📮', 'Nikdo nerad posílá upomínky. Červené číslo to řekne za tebe.'],
+  ['☕', 'Peníze nejsou všechno. Ale je příjemné vědět, kdo ti dluží za kafe.'],
+  ['🎯', 'Dnes je krásný den někomu připomenout pětikilo.'],
+  ['🧮', 'Počítat umí každý. Dopočítat se nikdo. Od toho je tu tahle stránka.'],
+  ['🐢', 'Dluh není želva, sám neuteče. Ale taky sám nepřijde.'],
+];
+
+function Welcome({ groups, name }) {
+  // Hláška se vybere jednou při zobrazení, ať při každém překreslení neskáče.
+  const quip = useMemo(() => QUIPS[Math.floor(Math.random() * QUIPS.length)], []);
+  const hour = new Date().getHours();
+  const hello = hour < 5 ? 'Dobrou noc' : hour < 10 ? 'Dobré ráno' : hour < 18 ? 'Ahoj' : 'Dobrý večer';
+  // Můj celkový stav napříč skupinami, zvlášť pro každou měnu.
+  const totals = {};
+  for (const g of groups) {
+    const my = balances(g)[g.me] || 0;
+    if (my) totals[g.currency] = (totals[g.currency] || 0) + my;
+  }
+  const lines = Object.entries(totals).filter(([, v]) => v);
+  return html`
+    <div class="placeholder welcome">
+      <div class="big">${quip[0]}</div>
+      <h2>${hello}${name ? `, ${name}` : ''}</h2>
+      ${groups.length === 0
+        ? html`<p class="welcome-sum">Zatím tu nemáš žádnou skupinu. Vytvoř první vlevo.</p>`
+        : lines.length === 0
+          ? html`<p class="welcome-sum"><span class="pos">Se všemi jsi vyrovnaný.</span> Užij si ten vzácný pocit.</p>`
+          : html`<p class="welcome-sum">${lines.map(([cur, v], i) => html`${i ? ' a ' : ''}${v > 0 ? 'Celkem ti lidi dluží ' : 'Celkem dlužíš '}<strong class=${v > 0 ? 'pos' : 'neg'}>${fmt(Math.abs(v), cur)}</strong>`)}.</p>`}
+      <p class="welcome-quip">${quip[1]}</p>
+      ${groups.length > 0 && html`<p class="muted welcome-hint">Vyber skupinu ze seznamu vlevo.</p>`}
+    </div>
+  `;
+}
+
 /* ---------- Detail skupiny ---------- */
 
 function GroupView({ group, onBack, onEdit, onShare, onEntry, onAdd, onPay, onQr, onMove }) {
@@ -1528,8 +1570,7 @@ function App({ user, recovery }) {
             onQr=${openQr}
             onMove=${groups.length > 1 ? (pay) => setSheet({ type: 'move', pay }) : null}
             onPay=${payDebt} />`
-            : html`<div class="placeholder"><div class="big">🧾</div>
-                <p>${groups.length ? 'Vyber skupinu ze seznamu vlevo.' : 'Začni vytvořením skupiny nebo importem ze Settle Up.'}</p></div>`}
+            : html`<${Welcome} groups=${groups} name=${prof.name} />`}
         </section>
       </div>
 
