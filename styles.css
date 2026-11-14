@@ -591,7 +591,7 @@ mark { background: color-mix(in srgb, var(--accent) 28%, transparent); color: in
 .only-narrow { display: none; }
 @media (max-width: 899px) {
   .only-narrow { display: block; }
-  .welcome-card { margin-top: 12px; padding: 18px; border-radius: var(--radius); background: var(--card); border: 1px solid var(--line); }
+  .welcome-card { margin-bottom: 4px; padding: 18px; border-radius: var(--radius); background: var(--card); border: 1px solid var(--line); }
   .welcome-card .row { align-items: center; gap: 14px; }
   .welcome-emoji { font-size: 40px; line-height: 1; }
   .welcome-card h2 { font-size: 20px; letter-spacing: -0.01em; }
@@ -747,3 +747,13 @@ mark { background: color-mix(in srgb, var(--accent) 28%, transparent); color: in
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; animation-delay: 0s !important; }
 }
+
+/* Dvoufázové ověření a skryté pole pro správce hesel */
+.vh { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); border: 0; opacity: 0; pointer-events: none; }
+.code-input { text-align: center; font-size: 26px !important; letter-spacing: 0.35em; font-variant-numeric: tabular-nums; padding-left: 0.35em; }
+.mfa-state { align-items: center; gap: 12px; }
+.mfa-state strong, .mfa-state small { display: block; }
+.mfa-qr { display: flex; justify-content: center; }
+.mfa-qr img { width: 200px; height: 200px; border-radius: 12px; background: #fff; }
+.secret { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; word-break: break-all; user-select: all; -webkit-user-select: all; }
+.auth main h2 { font-size: 20px; }

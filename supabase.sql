@@ -40,15 +40,30 @@ alter table public.groups enable row level security;
 alter table public.group_members enable row level security;
 revoke all on public.groups, public.group_members from anon, authenticated;
 
+-- Přihlášený uživatel s ohledem na dvoufázové ověření: kdo ho má zapnuté, musí mít relaci
+-- ověřenou i kódem (aal2). Jinak se funkce chovají, jako by nebyl přihlášen vůbec –
+-- samotné heslo tedy k datům nestačí, ani při volání serveru napřímo.
+create or replace function public.uid()
+returns uuid
+language sql stable security definer set search_path = ''
+as $$
+  select case
+    when coalesce(auth.jwt() ->> 'aal', 'aal1') = 'aal2'
+      or not exists (select 1 from auth.mfa_factors f where f.user_id = auth.uid() and f.status::text = 'verified')
+    then auth.uid()
+  end;
+$$;
+revoke execute on function public.uid() from public, anon, authenticated;
+
 -- Moje skupiny (jen ty, kde jsem členem).
 create or replace function public.my_groups()
 returns table (id uuid, data jsonb, version integer, invite text, is_owner boolean)
 language sql stable security definer set search_path = ''
 as $$
-  select g.id, g.data, g.version, g.invite, coalesce(g.owner = auth.uid(), false)
+  select g.id, g.data, g.version, g.invite, coalesce(g.owner = public.uid(), false)
   from public.groups g
   join public.group_members m on m.group_id = g.id
-  where m.user_id = auth.uid();
+  where m.user_id = public.uid();
 $$;
 
 -- Jedna skupina; nečlen nedostane nic.
@@ -56,10 +71,10 @@ create or replace function public.get_group(p_gid uuid)
 returns table (data jsonb, version integer, invite text, is_owner boolean)
 language sql stable security definer set search_path = ''
 as $$
-  select g.data, g.version, g.invite, coalesce(g.owner = auth.uid(), false)
+  select g.data, g.version, g.invite, coalesce(g.owner = public.uid(), false)
   from public.groups g
   join public.group_members m on m.group_id = g.id
-  where g.id = p_gid and m.user_id = auth.uid();
+  where g.id = p_gid and m.user_id = public.uid();
 $$;
 
 -- Účty, které mají ke skupině přístup (vidí jen člen).
@@ -69,7 +84,7 @@ language sql stable security definer set search_path = ''
 as $$
   select m.user_id from public.group_members m
   where m.group_id = p_gid
-    and exists (select 1 from public.group_members x where x.group_id = p_gid and x.user_id = auth.uid());
+    and exists (select 1 from public.group_members x where x.group_id = p_gid and x.user_id = public.uid());
 $$;
 
 -- Uložení. p_expected = 0 zakládá novou skupinu; jinak uloží jen tehdy,
@@ -80,7 +95,7 @@ language plpgsql security definer set search_path = ''
 as $$
 declare
   v integer;
-  me uuid := auth.uid();
+  me uuid := public.uid();
 begin
   if me is null then raise exception 'not signed in'; end if;
   if pg_column_size(p_data) > 1000000 then raise exception 'group too large'; end if;
@@ -113,14 +128,14 @@ returns table (id uuid, data jsonb, version integer, invite text, is_owner boole
 language sql volatile security definer set search_path = ''
 as $$
   insert into public.group_members (group_id, user_id)
-    select g.id, auth.uid() from public.groups g
-    where g.invite = p_token and auth.uid() is not null and length(p_token) >= 32
+    select g.id, public.uid() from public.groups g
+    where g.invite = p_token and public.uid() is not null and length(p_token) >= 32
       and (select count(*) from public.group_members m where m.group_id = g.id) < 100
   on conflict do nothing;
 
-  select g.id, g.data, g.version, g.invite, coalesce(g.owner = auth.uid(), false)
+  select g.id, g.data, g.version, g.invite, coalesce(g.owner = public.uid(), false)
   from public.groups g
-  join public.group_members m on m.group_id = g.id and m.user_id = auth.uid()
+  join public.group_members m on m.group_id = g.id and m.user_id = public.uid()
   where g.invite = p_token;
 $$;
 
@@ -129,7 +144,7 @@ create or replace function public.leave_group(p_gid uuid)
 returns void
 language plpgsql security definer set search_path = ''
 as $$
-declare me uuid := auth.uid();
+declare me uuid := public.uid();
 begin
   delete from public.group_members m where m.group_id = p_gid and m.user_id = me;
   if not found then return; end if;
@@ -151,7 +166,7 @@ as $$
 declare t text;
 begin
   update public.groups g set invite = replace(gen_random_uuid()::text, '-', '')
-    where g.id = p_gid and g.owner = auth.uid()
+    where g.id = p_gid and g.owner = public.uid()
     returning g.invite into t;
   if t is null then raise exception 'forbidden'; end if;
   return t;
@@ -166,9 +181,9 @@ language plpgsql security definer set search_path = ''
 as $$
 declare t text;
 begin
-  if p_user = auth.uid() then raise exception 'use leave_group'; end if;
+  if p_user = public.uid() then raise exception 'use leave_group'; end if;
   update public.groups g set invite = replace(gen_random_uuid()::text, '-', '')
-    where g.id = p_gid and g.owner = auth.uid()
+    where g.id = p_gid and g.owner = public.uid()
     returning g.invite into t;
   if t is null then raise exception 'forbidden'; end if;
   delete from public.group_members m where m.group_id = p_gid and m.user_id = p_user;
@@ -181,7 +196,7 @@ create or replace function public.delete_account()
 returns void
 language plpgsql security definer set search_path = ''
 as $$
-declare me uuid := auth.uid();
+declare me uuid := public.uid();
 begin
   if me is null then raise exception 'not signed in'; end if;
   delete from public.groups g
@@ -208,7 +223,7 @@ create or replace function public.is_admin()
 returns boolean
 language sql stable security definer set search_path = ''
 as $$
-  select exists (select 1 from public.app_admins a where a.user_id = auth.uid());
+  select exists (select 1 from public.app_admins a where a.user_id = public.uid());
 $$;
 revoke execute on function public.is_admin() from public, anon;
 grant execute on function public.is_admin() to authenticated;
@@ -278,7 +293,7 @@ language plpgsql security definer set search_path = ''
 as $$
 declare
   v integer;
-  me uuid := auth.uid();
+  me uuid := public.uid();
   adm boolean;
   old_data jsonb;
   old_owner uuid;
@@ -339,7 +354,7 @@ create or replace function public.save_push_subscription(p_endpoint text, p_p256
 returns void
 language plpgsql security definer set search_path = ''
 as $$
-declare me uuid := auth.uid();
+declare me uuid := public.uid();
 begin
   if me is null then raise exception 'not signed in'; end if;
   if p_endpoint !~ '^https://' or length(p_endpoint) > 1000 or length(p_p256dh) > 200 or length(p_auth) > 100 then
@@ -358,7 +373,7 @@ create or replace function public.delete_push_subscription(p_endpoint text)
 returns void
 language sql security definer set search_path = ''
 as $$
-  delete from public.push_subscriptions s where s.endpoint = p_endpoint and s.user_id = auth.uid();
+  delete from public.push_subscriptions s where s.endpoint = p_endpoint and s.user_id = public.uid();
 $$;
 
 revoke execute on function public.save_push_subscription(text, text, text), public.delete_push_subscription(text) from public, anon;
@@ -376,14 +391,14 @@ create or replace function public.get_notify_prefs()
 returns jsonb
 language sql stable security definer set search_path = ''
 as $$
-  select coalesce((select p.notify from public.user_prefs p where p.user_id = auth.uid()), '{}'::jsonb);
+  select coalesce((select p.notify from public.user_prefs p where p.user_id = public.uid()), '{}'::jsonb);
 $$;
 
 create or replace function public.set_notify_prefs(p_prefs jsonb)
 returns void
 language plpgsql security definer set search_path = ''
 as $$
-declare me uuid := auth.uid();
+declare me uuid := public.uid();
 begin
   if me is null then raise exception 'not signed in'; end if;
   if jsonb_typeof(p_prefs) <> 'object' or pg_column_size(p_prefs) > 2000 then raise exception 'invalid prefs'; end if;
@@ -439,7 +454,7 @@ as $$
   select b.taken_at, coalesce(jsonb_array_length(b.data -> 'entries'), 0)
   from public.group_backups b
   where b.group_id = p_gid
-    and exists (select 1 from public.group_members m where m.group_id = p_gid and m.user_id = auth.uid())
+    and exists (select 1 from public.group_members m where m.group_id = p_gid and m.user_id = public.uid())
   order by b.taken_at desc;
 $$;
 
@@ -450,7 +465,7 @@ language sql stable security definer set search_path = ''
 as $$
   select b.data from public.group_backups b
   where b.group_id = p_gid and b.taken_at = p_taken_at
-    and exists (select 1 from public.group_members m where m.group_id = p_gid and m.user_id = auth.uid());
+    and exists (select 1 from public.group_members m where m.group_id = p_gid and m.user_id = public.uid());
 $$;
 
 revoke execute on function public.list_backups(uuid), public.get_backup(uuid, timestamptz) from public, anon;

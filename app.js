@@ -9,7 +9,7 @@ import {
 } from './sync.js';
 import {
   getSession, onAuthChange, signUp, signIn, signInWithGoogle, sendPasswordReset,
-  updatePassword, signOut, consumeUrl,
+  updatePassword, signOut, consumeUrl, MIN_PASSWORD, refreshMfa, mfaStart, mfaVerify, mfaDisable,
 } from './auth.js';
 import { GOOGLE_LOGIN } from './config.js';
 import { parseSettleUp, decodeText } from './import.js';
@@ -550,6 +550,7 @@ function Home({ groups, profile, account, activeId, onOpen, onNew, onProfile, on
       </button>
     </header>
     <main>
+      <${WelcomeCard} groups=${groups} name=${profile.name} />
       ${groups.length === 0 && html`
         <div class="empty">
           <div class="big">🧾</div>
@@ -587,7 +588,6 @@ function Home({ groups, profile, account, activeId, onOpen, onNew, onProfile, on
       })}
       </div>
       <button class="btn primary wide" onClick=${onNew}>+ Nová skupina</button>
-      <${WelcomeCard} groups=${groups} name=${profile.name} />
     </main>
   `;
 }
@@ -1545,13 +1545,112 @@ function PasswordForm({ label = 'Změnit heslo', onDone }) {
   }
   return html`
     <form class="form" onSubmit=${submit}>
+      <input class="vh" type="email" name="email" autocomplete="username" readonly tabindex="-1" aria-hidden="true" value=${getSession()?.user?.email || ''} />
       <label class="field">
-        <span>Nové heslo (aspoň 8 znaků)</span>
-        <input type="password" autocomplete="new-password" minlength="8" maxlength="72" required value=${pw} onInput=${(e) => setPw(e.target.value)} />
+        <span>Nové heslo (aspoň ${MIN_PASSWORD} znaků)</span>
+        <input type="password" name="new-password" autocomplete="new-password" minlength=${MIN_PASSWORD} maxlength="72" required value=${pw} onInput=${(e) => setPw(e.target.value)} />
       </label>
-      <button class="btn wide" disabled=${busy || pw.length < 8}>${busy ? 'Ukládám…' : label}</button>
+      <button class="btn wide" disabled=${busy || pw.length < MIN_PASSWORD}>${busy ? 'Ukládám…' : label}</button>
       ${msg && html`<p class="hint" role="status">${msg}</p>`}
     </form>
+  `;
+}
+
+// Pole na šestimístný kód z ověřovací aplikace; iPhone ho umí nabídnout sám z Hesel.
+function CodeInput({ value, onInput }) {
+  return html`<input class="code-input" type="text" name="one-time-code" inputmode="numeric" autocomplete="one-time-code"
+    pattern="[0-9]{6}" maxlength="6" placeholder="000000" required value=${value}
+    onInput=${(e) => onInput(e.target.value.replace(/\D/g, '').slice(0, 6))} />`;
+}
+
+// Dvoufázové ověření v nastavení účtu: zapnutí (QR kód + potvrzení kódem) a vypnutí.
+function MfaSettings() {
+  const [mfa, setMfa] = useState(getSession()?.mfa || null);
+  const [setup, setSetup] = useState(null); // { id, uri, secret }
+  const [code, setCode] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState('');
+  useEffect(() => onAuthChange((s) => setMfa(s?.mfa || null)), []);
+  const run = async (fn) => {
+    setBusy(true);
+    setMsg('');
+    try { await fn(); } catch (e) { setMsg(e.message); }
+    setBusy(false);
+  };
+  const start = () => run(async () => setSetup(await mfaStart()));
+  const confirm = (ev) => {
+    ev.preventDefault();
+    run(async () => {
+      await mfaVerify(setup.id, code);
+      setSetup(null);
+      setCode('');
+      setMsg('Dvoufázové ověření je zapnuté ✓');
+    });
+  };
+  const off = async () => {
+    if (!(await ask('Vypnout dvoufázové ověření? Účet pak bude chránit jen heslo.', { ok: 'Vypnout' }))) return;
+    run(async () => { await mfaDisable(); setMsg('Dvoufázové ověření je vypnuté.'); });
+  };
+  if (setup) return html`
+    <form class="form mfa-setup" onSubmit=${confirm}>
+      <p class="hint"><strong>1.</strong> Otevři ověřovací aplikaci (Hesla na iPhonu, Google Authenticator, 1Password…) a naskenuj tento kód.</p>
+      <div class="qr mfa-qr"><${Qr} text=${setup.uri} alt="QR kód pro ověřovací aplikaci" /></div>
+      ${isIos() && html`<a class="btn wide" href=${setup.uri}>Přidat do Hesel na tomto iPhonu</a>`}
+      <p class="hint">Nejde skenovat? Zadej do aplikace ručně tento klíč: <code class="secret">${setup.secret}</code></p>
+      <label class="field">
+        <span><strong>2.</strong> Opiš šestimístný kód, který aplikace ukazuje</span>
+        <${CodeInput} value=${code} onInput=${setCode} />
+      </label>
+      ${msg && html`<p class="notice" role="status">${msg}</p>`}
+      <div class="row">
+        <button type="button" class="btn grow" onClick=${() => { setSetup(null); setCode(''); setMsg(''); }}>Zrušit</button>
+        <button class="btn primary grow" disabled=${busy || code.length !== 6}>${busy ? 'Ověřuji…' : 'Zapnout'}</button>
+      </div>
+    </form>`;
+  return html`
+    <div class="form">
+      <div class="row mfa-state">
+        <div class="grow">
+          <strong>Dvoufázové ověření</strong>
+          <small class=${mfa ? 'pos' : 'muted'}>${mfa ? 'Zapnuté ✓' : 'Vypnuté'}</small>
+        </div>
+        <button class=${'btn small' + (mfa ? '' : ' primary')} disabled=${busy} onClick=${mfa ? off : start}>${busy ? 'Moment…' : mfa ? 'Vypnout' : 'Zapnout'}</button>
+      </div>
+      <p class="hint">${mfa
+        ? 'Při přihlášení se kromě hesla ptáme i na kód z ověřovací aplikace. Bez něj se do účtu nedostane nikdo, ani kdyby znal heslo.'
+        : 'Při přihlášení se kromě hesla zeptáme i na kód z ověřovací aplikace v telefonu. Kdyby ti někdo zjistil heslo, do účtu se bez tvého telefonu nedostane.'}</p>
+      ${msg && html`<p class="hint" role="status">${msg}</p>`}
+    </div>`;
+}
+
+// Obrazovka po přihlášení heslem, když má účet zapnuté dvoufázové ověření.
+function MfaScreen({ factorId }) {
+  const [code, setCode] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState('');
+  async function submit(ev) {
+    ev && ev.preventDefault();
+    if (busy || code.length !== 6) return;
+    setBusy(true);
+    setMsg('');
+    try { await mfaVerify(factorId, code); } catch (e) { setMsg(e.message); setCode(''); setBusy(false); }
+  }
+  useEffect(() => { if (code.length === 6) submit(); }, [code]);
+  return html`
+    <div class="app auth">
+      <header class="top"><h1 class="brand"><${Logo} /></h1></header>
+      <main>
+        <h2>Dvoufázové ověření</h2>
+        <p>Zadej šestimístný kód z ověřovací aplikace.</p>
+        <form class="form" onSubmit=${submit}>
+          <${CodeInput} value=${code} onInput=${setCode} />
+          ${msg && html`<p class="notice" role="status">${msg}</p>`}
+          <button class="btn primary wide" disabled=${busy || code.length !== 6}>${busy ? 'Ověřuji…' : 'Ověřit'}</button>
+        </form>
+        <button class="btn link wide" onClick=${() => signOut()}>Přihlásit se jiným účtem</button>
+        <p class="hint center">Nemáš přístup k ověřovací aplikaci? Napiš správci aplikace, ověření ti vypne.</p>
+      </main>
+    </div>
   `;
 }
 
@@ -1704,6 +1803,7 @@ function ProfileSheet({ profile, user, admin, groupCount, onSave, onLogout, onDe
             <dt>Skupiny</dt><dd>${groupCount}</dd>
             ${admin && html`<dt>Role</dt><dd>správce aplikace</dd>`}
           </dl>
+          <${MfaSettings} />
           ${user.provider === 'email' && html`<${PasswordForm} />`}
         </section>`}
 
@@ -1769,12 +1869,13 @@ function AuthScreen({ notice }) {
         <form class="form" onSubmit=${submit}>
           <label class="field">
             <span>E-mail</span>
-            <input type="email" autocomplete="username" required maxlength="254" value=${email} onInput=${(e) => setEmail(e.target.value)} />
+            <input type="email" name="email" inputmode="email" autocapitalize="none" autocorrect="off" spellcheck=${false}
+              autocomplete="username" required maxlength="254" value=${email} onInput=${(e) => setEmail(e.target.value)} />
           </label>
           ${mode !== 'forgot' && html`
             <label class="field">
-              <span>Heslo${mode === 'up' ? ' (aspoň 8 znaků)' : ''}</span>
-              <input type="password" required minlength=${mode === 'up' ? 8 : 1} maxlength="72"
+              <span>Heslo${mode === 'up' ? ` (aspoň ${MIN_PASSWORD} znaků)` : ''}</span>
+              <input type="password" name="password" required minlength=${mode === 'up' ? MIN_PASSWORD : 1} maxlength="72"
                 autocomplete=${mode === 'up' ? 'new-password' : 'current-password'} value=${pw} onInput=${(e) => setPw(e.target.value)} />
             </label>`}
           ${msg && html`<p class="notice" role="status">${msg}</p>`}
@@ -2355,10 +2456,16 @@ function Root() {
       history.replaceState(null, '', location.pathname);
     }
     consumeUrl().then(setBoot).catch(() => setBoot({ error: 'Přihlášení se nepodařilo dokončit. Zkus to prosím znovu.' }));
+    // Dvoufázové ověření mohlo být zapnuto nebo vypnuto na jiném zařízení; zjistíme to při startu a při návratu do aplikace.
+    const check = () => { if (!document.hidden) refreshMfa().catch(() => {}); };
+    check();
+    document.addEventListener('visibilitychange', check);
+    return () => document.removeEventListener('visibilitychange', check);
   }, []);
 
   if (!boot) return html`<div class="empty">Načítám…</div>`;
   if (syncEnabled && !sess) return html`<${AuthScreen} notice=${boot.error} /><${DialogHost} />`;
+  if (syncEnabled && sess.mfa && !sess.mfa.ok) return html`<${MfaScreen} factorId=${sess.mfa.id} /><${DialogHost} />`;
   const user = syncEnabled ? sess.user : null;
   return html`<${App} key=${user?.id || 'local'} user=${user} recovery=${boot.type === 'recovery'} /><${DialogHost} />`;
 }
