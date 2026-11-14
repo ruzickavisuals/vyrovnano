@@ -102,26 +102,50 @@ function useDismiss(ref, open, close) {
     if (!open) return;
     const out = (e) => { if (ref.current && !ref.current.contains(e.target)) close(); };
     const key = (e) => { if (e.key === 'Escape') close(); };
+    // Při posunu stránky nebo okna by nabídka zůstala viset jinde než tlačítko, proto ji zavřeme.
+    const scroll = (e) => { if (!ref.current || !ref.current.contains(e.target)) close(); };
     document.addEventListener('pointerdown', out);
     document.addEventListener('keydown', key);
-    return () => { document.removeEventListener('pointerdown', out); document.removeEventListener('keydown', key); };
+    window.addEventListener('scroll', scroll, true);
+    window.addEventListener('resize', close);
+    return () => {
+      document.removeEventListener('pointerdown', out);
+      document.removeEventListener('keydown', key);
+      window.removeEventListener('scroll', scroll, true);
+      window.removeEventListener('resize', close);
+    };
   }, [open]);
+}
+
+// Umístění nabídky pod tlačítko (nebo nad něj, když dole není místo), vždy uvnitř obrazovky.
+function popupStyle(anchor, width, height) {
+  const r = anchor.getBoundingClientRect();
+  const w = Math.max(width || 0, r.width);
+  const left = Math.max(12, Math.min(r.left, innerWidth - w - 12));
+  const below = innerHeight - r.bottom >= height + 12 || r.top < height + 12;
+  return `left:${Math.round(left)}px;width:${Math.round(w)}px;` +
+    (below ? `top:${Math.round(r.bottom + 6)}px` : `bottom:${Math.round(innerHeight - r.top + 6)}px`);
 }
 
 // Rozbalovací nabídka. options = [[hodnota, popisek], …]; popisek může být i obsah s fotkou.
 function Select({ value, options, onChange, label, disabled }) {
   const [open, setOpen] = useState(false);
+  const [pos, setPos] = useState('');
   const ref = useRef();
   useDismiss(ref, open, () => setOpen(false));
   const cur = options.find((o) => o[0] === value);
+  const toggle = () => {
+    if (!open) setPos(popupStyle(ref.current, 0, Math.min(260, options.length * 42 + 14)));
+    setOpen(!open);
+  };
   return html`
     <div class="select" ref=${ref} onClick=${(e) => e.preventDefault()}>
       <button type="button" class="select-btn" aria-haspopup="listbox" aria-expanded=${open} aria-label=${label}
-        disabled=${disabled} onClick=${() => setOpen(!open)}>
+        disabled=${disabled} onClick=${toggle}>
         <span class="select-val">${cur ? cur[1] : ''}</span><i aria-hidden="true">▾</i>
       </button>
       ${open && html`
-        <div class="select-menu" role="listbox">
+        <div class="select-menu" role="listbox" style=${pos}>
           ${options.map(([v, l]) => html`
             <button type="button" role="option" aria-selected=${v === value} class=${'menu-item' + (v === value ? ' on' : '')}
               onClick=${() => { onChange(v); setOpen(false); }}>${l}</button>
@@ -135,6 +159,7 @@ function Select({ value, options, onChange, label, disabled }) {
 function DateField({ value, onChange }) {
   const [open, setOpen] = useState(false);
   const [view, setView] = useState(value.slice(0, 7));
+  const [pos, setPos] = useState('');
   const ref = useRef();
   useDismiss(ref, open, () => setOpen(false));
   const [y, m] = view.split('-').map(Number);
@@ -150,11 +175,11 @@ function DateField({ value, onChange }) {
   return html`
     <div class="select" ref=${ref} onClick=${(e) => e.preventDefault()}>
       <button type="button" class="select-btn" aria-label="Datum" aria-expanded=${open}
-        onClick=${() => { setView(value.slice(0, 7)); setOpen(!open); }}>
+        onClick=${() => { setView(value.slice(0, 7)); if (!open) setPos(popupStyle(ref.current, 308, 348)); setOpen(!open); }}>
         <span class="select-val">${label}</span><i aria-hidden="true">▾</i>
       </button>
       ${open && html`
-        <div class="select-menu cal right">
+        <div class="select-menu cal" style=${pos}>
           <div class="cal-head">
             <button type="button" class="cal-nav" onClick=${() => shift(-1)} aria-label="Předchozí měsíc">‹</button>
             <strong>${first.toLocaleDateString('cs-CZ', { month: 'long', year: 'numeric' })}</strong>
@@ -164,7 +189,7 @@ function DateField({ value, onChange }) {
             ${['Po', 'Út', 'St', 'Čt', 'Pá', 'So', 'Ne'].map((d) => html`<span class="dow">${d}</span>`)}
             ${Array.from({ length: offset }, () => html`<span></span>`)}
             ${Array.from({ length: days }, (_, i) => html`
-              <button type="button" class=${'cal-day' + (iso(i + 1) === value ? ' on' : iso(i + 1) === today() ? ' today' : '')}
+              <button type="button" class=${'cal-day' + (iso(i + 1) === value ? ' on' : iso(i + 1) === today() ? ' today' : '') + ((offset + i) % 7 > 4 ? ' weekend' : '')}
                 onClick=${() => { onChange(iso(i + 1)); setOpen(false); }}>${i + 1}</button>
             `)}
           </div>
@@ -286,12 +311,14 @@ function GroupView({ group, onBack, onEdit, onShare, onEntry, onAdd, onPay, onQr
         <h2 class="panel-title">Výdaje</h2>
         <${Entries} group=${group} onEntry=${onEntry} />
       </section>
+      <div class="col-right">
       <section class=${'panel p-debts' + (tab === 'debts' ? ' on' : '')}>
         <${Debts} group=${group} bal=${bal} onPay=${onPay} onQr=${onQr} />
       </section>
       <section class=${'panel p-stats' + (tab === 'stats' ? ' on' : '')}>
         <${Stats} group=${group} st=${st} />
       </section>
+      </div>
     </main>
     <button class="fab" onClick=${onAdd} aria-label="Přidat výdaj">+</button>
   `;
