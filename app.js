@@ -1221,7 +1221,7 @@ function EntryForm({ group, entry, onSave, onDelete }) {
 
 /* ---------- Formulář skupiny ---------- */
 
-function GroupForm({ group, profile, userId, admin, deleteLabel, onSave, onDelete, onBackups }) {
+function GroupForm({ group, profile, userId, admin, deleteLabel, onSave, onDelete, onBackups, onWho }) {
   const [name, setName] = useState(group?.name || '');
   const [emoji, setEmoji] = useState(group?.emoji || '👥');
   const [color, setColor] = useState(group?.color || 'teal');
@@ -1301,6 +1301,8 @@ function GroupForm({ group, profile, userId, admin, deleteLabel, onSave, onDelet
         `)}
       </div>
       <button type="button" class="btn wide" onClick=${() => setMembers((ms) => [...ms, { id: uid(), name: '' }])}>+ Přidat člena</button>
+      ${group && userId && onWho && html`
+        <button type="button" class="btn link wide" onClick=${onWho}>Jsem ve skupině někdo jiný · změnit, kdo jsem</button>`}
 
       <button class="btn primary wide" disabled=${!!error}>${error || (group ? 'Uložit' : 'Vytvořit skupinu')}</button>
       ${group && html`<button type="button" class="btn wide" onClick=${onBackups}>Zálohy a export</button>`}
@@ -1400,16 +1402,30 @@ const sameName = (a, b) => {
   return !!x && !!y && (x === y || x.split(/\s+/).some((w) => w.length > 2 && y.split(/\s+/).includes(w)));
 };
 
-function WhoSheet({ group, profile, known, onPick }) {
-  const [name, setName] = useState(profile.name);
+function WhoSheet({ group, profile, known, userId, onPick }) {
   const likely = (m) => known.some((k) => sameName(k, m.name));
   // Nabízíme jen členy, které si ještě nikdo nepřivlastnil; pravděpodobná shoda je nahoře.
   const free = group.members.filter((m) => !m.uid && !m.inactive).sort((a, b) => likely(b) - likely(a));
+  // Při změně „kdo jsem“ ukážeme i člena, se kterým je účet propojený teď.
+  const current = userId ? group.members.find((m) => m.uid === userId) : null;
+  // Nový člen se zakládá až na vyžádání a s prázdným jménem – dřív tu bylo předvyplněné jméno
+  // a tlačítko hned pod seznamem, takže šlo omylem založit druhého „sebe“.
+  const [adding, setAdding] = useState(free.length === 0 && !current);
+  const [name, setName] = useState(free.length === 0 && !current ? profile.name : '');
+  const twin = group.members.find((m) => normName(m.name) === normName(name));
+  const twinFree = twin && !twin.uid && !twin.inactive;
   return html`
     <div class="form">
-      <p>Vyber, kdo ze skupiny jsi. Tvůj účet se propojí s tímto členem a s jeho dosavadními výdaji.</p>
-      ${free.length > 0 && html`
+      <p>${current
+        ? 'Vyber, kdo ze skupiny doopravdy jsi. Tvůj účet se přepojí na vybraného člena a jeho dosavadní výdaje.'
+        : 'Vyber, kdo ze skupiny jsi. Tvůj účet se propojí s tímto členem a s jeho dosavadními výdaji.'}</p>
+      ${(free.length > 0 || current) && html`
         <div class="card list">
+          ${current && html`
+            <div class="item static">
+              <${Avatar} m=${current} size=${34} /><strong class="grow">${current.name}</strong>
+              <em class="tag">teď jsi tento</em>
+            </div>`}
           ${free.map((m) => html`
             <button class="item" onClick=${() => onPick(m.id)}>
               <${Avatar} m=${m} size=${34} /><strong class="grow">${m.name}</strong>
@@ -1417,11 +1433,19 @@ function WhoSheet({ group, profile, known, onPick }) {
             </button>
           `)}
         </div>`}
-      <label class="field">
-        <span>Nejsem v seznamu</span>
-        <input value=${name} maxlength="60" placeholder="Tvoje jméno" onInput=${(e) => setName(e.target.value)} />
-      </label>
-      <button class="btn wide" disabled=${!name.trim()} onClick=${() => onPick(null, name.trim())}>Přidat mě do skupiny</button>
+      ${current && free.length === 0 && html`<p class="hint">Žádný další volný člen ve skupině není.</p>`}
+      ${!adding
+        ? html`<button type="button" class="btn link wide" onClick=${() => setAdding(true)}>Nejsem v seznamu</button>`
+        : html`
+          <label class="field">
+            <span>${free.length > 0 || current ? 'Nejsem v seznamu – přidat mě jako nového člena' : 'Tvoje jméno ve skupině'}</span>
+            <input value=${name} maxlength="60" placeholder="Tvoje jméno" onInput=${(e) => setName(e.target.value)} />
+          </label>
+          ${twin && html`<p class="notice">${twinFree
+            ? `Člen „${twin.name}“ už ve skupině je. Klepni na něj v seznamu nahoře, ať se ti propojí i jeho dosavadní výdaje.`
+            : `Člen „${twin.name}“ už ve skupině je a patří k jinému účtu. Zvol jiné jméno.`}</p>`}
+          <button class="btn wide" disabled=${!name.trim() || !!twin} onClick=${() => onPick(null, name.trim())}>Přidat mě jako nového člena</button>
+          ${free.length > 0 && html`<p class="hint">Nový člen začíná bez historie. Pokud už ve skupině jsi (třeba z importu), vyber se raději v seznamu.</p>`}`}
     </div>
   `;
 }
@@ -2456,18 +2480,36 @@ function App({ user, recovery }) {
   }
 
   const needsWho = group && !group.members.some((m) => m.id === group.me);
+  // Propojení mého účtu s členem skupiny. Slouží i k opravě, když se někdo spároval špatně:
+  // dosavadní „já“ se odpojí, a pokud je prázdné (vzniklo omylem, nemá žádný záznam), rovnou zmizí.
   function pickWho(id, newName) {
     const mine = { uid: user?.id };
+    // Zadané jméno se shoduje s volným členem: propojíme s ním, druhého stejného nezakládáme.
+    if (!id && newName) {
+      const same = group.members.find((m) => normName(m.name) === normName(newName));
+      if (same && !same.uid && !same.inactive) id = same.id;
+      else if (same) return notify(`Člen „${same.name}“ už ve skupině je. Zvol prosím jiné jméno.`);
+    }
     const taken = id && group.members.find((m) => m.id === id)?.uid;
     if (taken && taken !== user?.id) return notify('Tohoto člena si mezitím vybral někdo jiný. Vyber prosím jiného.');
-    announce(group, `nový člen ve skupině (${id ? nameOf(group, id) : newName})`, 'joined');
-    const joined = (g) => logged(g, 'join', id ? `připojil(a) se ke skupině jako ${nameOf(group, id)}` : 'připojil(a) se ke skupině');
+    const used = new Set(group.entries.flatMap((e) => [e.paidBy, ...Object.keys(e.parts)]));
+    const wasMine = (m) => !!user && m.uid === user.id && m.id !== id;
+    const had = group.members.some(wasMine);
+    // Odpojenému členovi nenecháme moje číslo účtu ani fotku, které se k němu při spárování propsaly.
+    const unlink = (m) => ({ ...m, uid: undefined,
+      iban: m.iban && m.iban === profile.iban ? undefined : m.iban,
+      avatar: m.avatar && m.avatar === profile.avatar ? undefined : m.avatar });
+    const rest = group.members.filter((m) => !(wasMine(m) && !used.has(m.id))).map((m) => (wasMine(m) ? unlink(m) : m));
+    const who = id ? nameOf(group, id) : newName;
+    if (!had) announce(group, `nový člen ve skupině (${who})`, 'joined');
+    const joined = (g) => logged(g, 'join', had ? `změnil(a), kdo ve skupině je: teď ${who}`
+      : id ? `připojil(a) se ke skupině jako ${who}` : `připojil(a) se ke skupině jako nový člen ${who}`);
     if (id) {
       putGroup(joined({ ...group, mu: Date.now(), me: id,
-        members: group.members.map((m) => (m.id === id ? { ...m, ...mine, avatar: m.avatar || profile.avatar, iban: m.iban || profile.iban || undefined } : m)) }));
+        members: rest.map((m) => (m.id === id ? { ...m, ...mine, avatar: m.avatar || profile.avatar, iban: m.iban || profile.iban || undefined } : m)) }));
     } else {
       const m = { id: uid(), name: newName, avatar: profile.avatar, iban: profile.iban || undefined, ...mine };
-      putGroup(joined({ ...group, mu: Date.now(), me: m.id, members: [...group.members, m] }));
+      putGroup(joined({ ...group, mu: Date.now(), me: m.id, members: [...rest, m] }));
       if (!profile.name) setProfile({ ...profile, name: newName });
     }
   }
@@ -2640,6 +2682,7 @@ function App({ user, recovery }) {
       ${sheet?.type === 'group' && html`
         <${Sheet} title=${sheet.group ? 'Upravit skupinu' : 'Nová skupina'} onClose=${close}>
           <${GroupForm} group=${sheet.group} profile=${prof} userId=${user?.id} admin=${admin} onSave=${saveGroupForm}
+            onWho=${sheet.group ? () => setSheet({ type: 'who' }) : null}
             deleteLabel=${!user ? 'Smazat skupinu' : sheet.group?.members.some((m) => m.uid && m.uid !== user.id) ? 'Opustit skupinu' : 'Smazat skupinu'}
             onDelete=${() => removeGroup(sheet.group)} onBackups=${() => setSheet({ type: 'backups' })} />
         <//>`}
@@ -2698,6 +2741,10 @@ function App({ user, recovery }) {
       ${needsWho && !sheet && html`
         <${Sheet} title="Kdo jsi?" onClose=${() => setGid(null)}>
           <${WhoSheet} group=${group} profile=${prof} known=${known} onPick=${pickWho} />
+        <//>`}
+      ${sheet?.type === 'who' && group && html`
+        <${Sheet} title="Kdo jsi?" onClose=${close}>
+          <${WhoSheet} group=${group} profile=${prof} known=${known} userId=${user?.id} onPick=${pickWho} />
         <//>`}
     </div>
   `;

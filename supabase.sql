@@ -270,8 +270,9 @@ begin
       end if;
     end if;
 
+    -- Číslo účtu smí měnit jen ten, komu člen patří (nebo patřil těsně před touto změnou – při odpojení se od člena).
     if not p_can_iban and coalesce(m ->> 'iban', '') <> coalesce(o ->> 'iban', '')
-       and coalesce(fixed ->> 'uid', '') <> mine then
+       and coalesce(fixed ->> 'uid', '') <> mine and coalesce(o ->> 'uid', '') <> mine then
       fixed := fixed - 'iban';
       if coalesce(o ->> 'iban', '') <> '' then fixed := fixed || jsonb_build_object('iban', o -> 'iban'); end if;
       changed := true;
