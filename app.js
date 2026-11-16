@@ -17,6 +17,8 @@ import { EMOJI, COLORS } from './emoji.js';
 import { pushSupported, isStandalone, isIos, pushState, enablePush, disablePush, pausePush, resumePush, notifyGroup, testPush } from './push.js';
 
 const KEY = 'vyrovnano.v1';
+// Aplikace je jen tmavá, bez ohledu na nastavení systému i dřívější volbu v profilu.
+document.documentElement.dataset.theme = 'dark';
 const JKEY = 'vyrovnano.join';
 // Pozvánka otevřená před přihlášením. Držíme ji v zařízení 7 dní, aby přežila přihlášení přes Google,
 // potvrzení e-mailu v novém panelu i zavření prohlížeče, a použijeme ji hned po přihlášení.
@@ -2118,10 +2120,9 @@ function ProfileSheet({ profile, user, admin, groupCount, onSave, onLogout, onDe
   const [avatar, setAvatar] = useState(profile.avatar);
   const [iban, setIban] = useState(profile.iban || '');
   const [currency, setCurrency] = useState(profile.currency || 'CZK');
-  const [theme, setTheme] = useState(profile.theme || 'auto');
   const ibanBad = !!iban.trim() && !toIban(iban);
   const dirty = name.trim() !== profile.name || avatar !== profile.avatar || iban.trim() !== (profile.iban || '')
-    || currency !== (profile.currency || 'CZK') || theme !== (profile.theme || 'auto');
+    || currency !== (profile.currency || 'CZK');
   const pick = async () => { const a = await pickImage(); if (a) setAvatar(a); };
   return html`
     <div class="form settings">
@@ -2167,16 +2168,12 @@ function ProfileSheet({ profile, user, admin, groupCount, onSave, onLogout, onDe
           <span>Výchozí měna nových skupin</span>
           <${Select} label="Výchozí měna" value=${currency} onChange=${setCurrency} options=${CURRENCIES.map((c) => [c, c])} />
         </div>
-        <div class="field">
-          <span>Vzhled</span>
-          <${Seg} value=${theme} onChange=${setTheme} options=${[['auto', 'Podle systému'], ['light', 'Světlý'], ['dark', 'Tmavý']]} />
-        </div>
       </section>
 
       ${user && html`<${PushSettings} />`}
 
       <button class="btn primary wide" disabled=${!dirty || ibanBad}
-        onClick=${() => onSave({ name: name.trim(), avatar, iban: iban.trim(), currency, theme })}>
+        onClick=${() => onSave({ name: name.trim(), avatar, iban: iban.trim(), currency })}>
         ${dirty ? 'Uložit změny' : 'Vše uloženo'}
       </button>
 
@@ -2729,12 +2726,6 @@ function App({ user, recovery }) {
     downloadFile(`vyrovnano-vsechny-skupiny-${today()}.json`,
       JSON.stringify({ app: 'vyrovnano', exported: new Date().toISOString(), groups: groups.map(shared) }, null, 1));
   }
-  // Ručně zvolený vzhled (světlý/tmavý) přebije nastavení systému.
-  useEffect(() => {
-    const t = profile.theme;
-    if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t;
-    else delete document.documentElement.dataset.theme;
-  }, [profile.theme]);
   function importSettleUp() {
     const input = document.createElement('input');
     input.type = 'file';
