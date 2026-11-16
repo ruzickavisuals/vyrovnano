@@ -835,3 +835,8 @@ body.intro-go .tabbar { transition: translate 0.75s var(--ease) 0.25s; }
 .rec-row { gap: 10px; padding: 10px 12px; }
 .rec-row .grow { display: flex; flex-direction: column; min-width: 0; }
 .rec-row .grow strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ---------- Co je nového ---------- */
+.news ul li { display: flex; gap: 10px; align-items: flex-start; line-height: 1.35; }
+.news ul li > span:first-child { font-size: 18px; flex: none; width: 24px; text-align: center; }
+.news ul { background: linear-gradient(160deg, var(--accent-soft), var(--card) 70%); }

@@ -2121,6 +2121,27 @@ function MfaScreen({ factorId }) {
 
 // Nabídka notifikací při prvním spuštění. Zapnutí musí být přímo na klepnutí, jinak ho iPhone nepovolí.
 const PUSH_ASKED = 'vyrovnano.pushAsked';
+// Okno „Co je nového“: na každém zařízení se ukáže jednou. Při další velké novince stačí změnit označení verze.
+const NEWS_KEY = 'vyrovnano.news';
+const NEWS_VERSION = '2026-11-automatizace';
+function NewsSheet({ onSettings, onDone }) {
+  return html`
+    <div class="form push-ask news">
+      <div class="big" aria-hidden="true">🎉</div>
+      <h3>Hurá, je tu nová verze</h3>
+      <p>Vyrovnáno teď spoustu věcí hlídá za tebe.</p>
+      <ul>
+        <li><span>📅</span><span><strong>Měsíční přehled dluhů</strong> v den, který si zvolíš, třeba po výplatě</span></li>
+        <li><span>⏰</span><span><strong>Upomínka na starý dluh</strong>, když visí déle než 30 dní</span></li>
+        <li><span>🔁</span><span><strong>Pravidelné výdaje</strong>: nájem nebo Netflix se zapíšou samy</span></li>
+        <li><span>🏁</span><span><strong>Konec akce</strong>: den po dovolené přijde všem vyúčtování</span></li>
+        <li><span>💸</span><span><strong>Vyrovnání po částech</strong> přes QR, převod nebo hotově</span></li>
+      </ul>
+      <p class="hint">Co ti má chodit a kdy, si nastavíš podle sebe. Všechno jde kdykoli vypnout.</p>
+      <button class="btn primary wide" onClick=${onSettings}>Nastavit notifikace</button>
+      <button class="btn link wide" onClick=${onDone}>Díky, teď ne</button>
+    </div>`;
+}
 function PushAsk({ onDone }) {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
@@ -2155,7 +2176,10 @@ function PushAsk({ onDone }) {
 }
 
 // Zapnutí a vypnutí notifikací na tomto zařízení.
-function PushSettings() {
+function PushSettings({ focus }) {
+  const box = useRef();
+  // Po příchodu z okna „Co je nového“ sjedeme rovnou sem.
+  useEffect(() => { if (focus) setTimeout(() => box.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 350); }, []);
   const [state, setState] = useState('loading'); // loading | unsupported | denied | on | off
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
@@ -2184,7 +2208,7 @@ function PushSettings() {
   }
   const needsInstall = state === 'unsupported' && isIos() && !isStandalone();
   return html`
-    <section class="card set-card">
+    <section class="card set-card" ref=${box}>
       <h3>Notifikace</h3>
       ${state === 'unsupported'
         ? html`<p class="hint">${needsInstall
@@ -2234,7 +2258,7 @@ function PushSettings() {
   `;
 }
 
-function ProfileSheet({ profile, user, admin, groupCount, onSave, onLogout, onDeleteAccount, onImport, onExportAll }) {
+function ProfileSheet({ focus, profile, user, admin, groupCount, onSave, onLogout, onDeleteAccount, onImport, onExportAll }) {
   const [name, setName] = useState(profile.name);
   const [avatar, setAvatar] = useState(profile.avatar);
   const [iban, setIban] = useState(profile.iban || '');
@@ -2289,7 +2313,7 @@ function ProfileSheet({ profile, user, admin, groupCount, onSave, onLogout, onDe
         </div>
       </section>
 
-      ${user && html`<${PushSettings} />`}
+      ${user && html`<${PushSettings} focus=${focus === 'push'} />`}
 
       <button class="btn primary wide" disabled=${!dirty || ibanBad}
         onClick=${() => onSave({ name: name.trim(), avatar, iban: iban.trim(), currency })}>
@@ -2811,6 +2835,16 @@ function App({ user, recovery }) {
     close();
   }
   const needsWho = group && !group.members.some((m) => m.id === group.me);
+  // Okno „Co je nového“: jednou na zařízení, a jen tomu, kdo už aplikaci používal (má v ní nějakou skupinu).
+  useEffect(() => {
+    if (!user || sheet || needsWho) return;
+    try { if (localStorage.getItem(NEWS_KEY) === NEWS_VERSION) return; } catch { return; }
+    const t = setTimeout(() => {
+      try { localStorage.setItem(NEWS_KEY, NEWS_VERSION); } catch {}
+      if (ref.current.length) setSheet((cur) => cur || { type: 'news' });
+    }, 700);
+    return () => clearTimeout(t);
+  }, [!!sheet, !!needsWho]);
   // Při prvním spuštění na zařízení nabídneme zapnutí notifikací (jen jednou a jen tam, kde zapnout jdou).
   // Počkáme, až nic jiného nepřekáží: žádné otevřené okno ani výběr „Kdo jsi?“.
   useEffect(() => {
@@ -3059,6 +3093,10 @@ function App({ user, recovery }) {
         <${Sheet} title="Převést dluh" onClose=${close}>
           <${MoveSheet} group=${group} groups=${groups} pay=${sheet.pay} onMove=${(g, f, t) => moveDebt(sheet.pay, g, f, t)} />
         <//>`}
+      ${sheet?.type === 'news' && html`
+        <${Sheet} title="Co je nového" onClose=${close}>
+          <${NewsSheet} onDone=${close} onSettings=${() => setSheet({ type: 'profile', focus: 'push' })} />
+        <//>`}
       ${sheet?.type === 'pushask' && html`
         <${Sheet} title="Notifikace" onClose=${close}>
           <${PushAsk} onDone=${close} />
@@ -3077,7 +3115,7 @@ function App({ user, recovery }) {
         <//>`}
       ${sheet?.type === 'profile' && html`
         <${Sheet} title="Nastavení účtu" onClose=${close}>
-          <${ProfileSheet} profile=${profile} user=${user} admin=${admin} groupCount=${groups.length} onSave=${saveProfile}
+          <${ProfileSheet} focus=${sheet.focus} profile=${profile} user=${user} admin=${admin} groupCount=${groups.length} onSave=${saveProfile}
             onLogout=${() => logout()} onDeleteAccount=${removeAccount} onExportAll=${exportAll}
             onImport=${() => { close(); importSettleUp(); }} />
         <//>`}
