@@ -509,16 +509,17 @@ grant execute on function
   public.reset_invite(uuid), public.kick_member(uuid, uuid), public.delete_account()
   to authenticated;
 
--- ===== Měsíční připomínka dluhů =====
--- Prvního v měsíci v 8:00 UTC (9:00 v zimě, 10:00 v létě) zavolá databáze funkci „notify“,
--- která každému pošle přehled, komu dluží a kdo dluží jemu. Prokazuje se náhodným heslem,
--- které si databáze sama vygenerovala a které zná jen ona a serverová funkce.
+-- ===== Automatické připomínky =====
+-- Každý den v 8:00 UTC (9:00 v zimě, 10:00 v létě) zavolá databáze funkci „notify“. Ta pošle
+-- měsíční přehled dluhů (v den, který si kdo zvolil), upomínky na staré dluhy a vyúčtování po konci akce.
+-- Prokazuje se náhodným heslem, které si databáze sama vygenerovala a které zná jen ona a serverová funkce.
 create extension if not exists pg_net;
 insert into public.app_secrets (name, value)
   values ('cron', jsonb_build_object('key', encode(extensions.gen_random_bytes(32), 'hex')))
   on conflict (name) do nothing;
 
-create or replace function public.monthly_reminder(p_only text default '', p_dry boolean default false)
+drop function if exists public.monthly_reminder(text, boolean);
+create or replace function public.daily_reminders(p_only text default '', p_dry boolean default false, p_force text default '')
 returns bigint
 language sql security definer set search_path = ''
 as $$
@@ -526,9 +527,10 @@ as $$
     url := 'https://pfikocjcjleshidgwapi.supabase.co/functions/v1/notify',
     headers := jsonb_build_object('Content-Type', 'application/json',
       'x-cron-key', (select s.value ->> 'key' from public.app_secrets s where s.name = 'cron')),
-    body := jsonb_build_object('only', p_only, 'dry', p_dry),
+    body := jsonb_build_object('only', p_only, 'dry', p_dry, 'force', p_force),
     timeout_milliseconds := 30000);
 $$;
-revoke execute on function public.monthly_reminder(text, boolean) from public, anon, authenticated;
+revoke execute on function public.daily_reminders(text, boolean, text) from public, anon, authenticated;
 
-select cron.schedule('vyrovnano-mesicni-pripominka', '0 8 1 * *', 'select public.monthly_reminder()');
+select cron.unschedule(jobid) from cron.job where jobname = 'vyrovnano-mesicni-pripominka';
+select cron.schedule('vyrovnano-denni-pripominky', '0 8 * * *', 'select public.daily_reminders()');

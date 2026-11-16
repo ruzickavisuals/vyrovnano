@@ -27,7 +27,7 @@ function decorate(text: string, type: string): string {
   return `${icon} ${text}`;
 }
 
-/* ---------- Měsíční připomínka dluhů ---------- */
+/* ---------- Automatické připomínky ---------- */
 // Stejný výpočet jako v aplikaci (logic.js): podíly na haléř přesně, zůstatky a návrh plateb.
 type Entry = { amount: number; rate?: number; parts: Record<string, number>; paidBy: string; kind?: string };
 type Group = { name?: string; emoji?: string; currency?: string; members?: { id: string; name?: string; uid?: string }[]; entries?: Entry[] };
@@ -84,63 +84,128 @@ function money(cents: number, currency: string) {
     return `${(cents / 100).toFixed(whole ? 0 : 2)} ${currency}`;
   }
 }
+type Item = { who: string; amount: number; cur: string; group: string; days?: number };
 // Řádek typu „Petr 800 Kč (KANCL), Jana 250 Kč (Byt) a 2 další“.
-function listLine(items: { who: string; amount: number; cur: string; group: string }[]) {
+function listLine(items: Item[], withDays = false) {
   items.sort((a, b) => b.amount - a.amount);
-  const shown = items.slice(0, 3).map((i) => `${i.who} ${money(i.amount, i.cur)} (${i.group})`).join(", ");
+  const shown = items.slice(0, 3).map((i) => `${i.who} ${money(i.amount, i.cur)} (${i.group}${withDays ? `, ${i.days} dní` : ""})`).join(", ");
   const more = items.length - 3;
   return more > 0 ? `${shown} a ${more} další` : shown;
 }
-// Pro každého člověka sečte, komu dluží a kdo dluží jemu, přes všechny jeho skupiny.
-// Spouští ji jen plánovač databáze (1. den v měsíci); `only` omezí běh na jeden účet, `dry` nic neodešle.
+const pragueToday = () => new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Prague" }).format(new Date());
+const dayDiff = (a: string, b: string) => Math.round((Date.parse(a) - Date.parse(b)) / 86400000);
+// Kolikátý den bez pohybu se starý dluh připomíná.
+const OVERDUE_DAYS = [30, 45, 60, 90];
+
+// Každodenní běh (spouští ho plánovač databáze). Posílá tři druhy zpráv:
+//  1) měsíční přehled dluhů – v den, který si člověk zvolil (výchozí 1.),
+//  2) upomínku na starý dluh – když dlužník ve skupině 30, 45, 60 a 90 dní nic nezapsal a pořád dluží,
+//  3) vyúčtování po konci akce – den po datu konce, které má skupina nastavené.
+// `only` omezí běh na jeden účet, `dry` nic neodešle, `force` = "monthly" pošle měsíční přehled bez ohledu na den.
 // deno-lint-ignore no-explicit-any
-async function monthly(admin: any, keys: { publicKey: string; privateKey: string }, only: string, dry: boolean) {
+async function daily(admin: any, keys: { publicKey: string; privateKey: string }, only: string, dry: boolean, force: string) {
+  const today = pragueToday();
+  const dom = Number(today.slice(8, 10));
   const { data: groups } = await admin.from("groups").select("id,data");
   const { data: links } = await admin.from("group_members").select("group_id,user_id");
-  type Item = { who: string; amount: number; cur: string; group: string };
-  const per: Record<string, { owe: Item[]; get: Item[] }> = {};
+  const per: Record<string, { owe: Item[]; get: Item[]; old: Item[]; ended: { title: string; owe: Item[]; get: Item[] }[] }> = {};
+  const slot = (u: string) => (per[u] ??= { owe: [], get: [], old: [], ended: [] });
   for (const row of groups ?? []) {
-    const g = row.data as Group;
-    const users = new Set((links ?? []).filter((l: { group_id: string }) => l.group_id === row.id).map((l: { user_id: string }) => l.user_id));
+    const g = row.data as Group & { ends?: string };
+    const users = new Set<string>((links ?? []).filter((l: { group_id: string }) => l.group_id === row.id).map((l: { user_id: string }) => l.user_id));
     const byId = Object.fromEntries((g.members ?? []).map((m) => [m.id, m]));
+    const cur = g.currency || "CZK", group = g.name || "Skupina";
+    const ended = typeof g.ends === "string" && /^\d{4}-\d{2}-\d{2}$/.test(g.ends) && dayDiff(today, g.ends) === 1;
+    const fin: Record<string, { title: string; owe: Item[]; get: Item[] }> = {};
+    if (ended) for (const m of g.members ?? []) if (m.uid && users.has(m.uid)) fin[m.uid] = { title: `🏁 ${g.emoji || ""} ${group}: akce skončila`.replace("  ", " "), owe: [], get: [] };
+    // Poslední den, kdy se daný člen ve skupině objevil v nějakém záznamu.
+    const last: Record<string, string> = {};
+    for (const e of (g.entries ?? []) as (Entry & { date?: string })[]) {
+      const d = typeof e.date === "string" && e.date <= today ? e.date : "";
+      if (!d) continue;
+      for (const id of [e.paidBy, ...Object.keys(e.parts ?? {})]) if (!last[id] || d > last[id]) last[id] = d;
+    }
     for (const p of settle(g)) {
       if (p.amount < 100) continue; // drobné do jedné koruny neřešíme
       const from = byId[p.from], to = byId[p.to];
-      const cur = g.currency || "CZK", group = g.name || "Skupina";
-      if (from?.uid && users.has(from.uid)) ((per[from.uid] ??= { owe: [], get: [] }).owe).push({ who: to?.name || "?", amount: p.amount, cur, group });
-      if (to?.uid && users.has(to.uid)) ((per[to.uid] ??= { owe: [], get: [] }).get).push({ who: from?.name || "?", amount: p.amount, cur, group });
+      if (from?.uid && users.has(from.uid)) {
+        const it = { who: to?.name || "?", amount: p.amount, cur, group };
+        slot(from.uid).owe.push(it);
+        fin[from.uid]?.owe.push(it);
+        const days = last[p.from] ? dayDiff(today, last[p.from]) : 0;
+        if (OVERDUE_DAYS.includes(days)) slot(from.uid).old.push({ ...it, days });
+      }
+      if (to?.uid && users.has(to.uid)) {
+        const it = { who: from?.name || "?", amount: p.amount, cur, group };
+        slot(to.uid).get.push(it);
+        fin[to.uid]?.get.push(it);
+      }
     }
+    for (const u in fin) slot(u).ended.push(fin[u]);
   }
   let ids = Object.keys(per);
   if (only) ids = ids.filter((id) => id === only);
-  if (!ids.length) return { people: 0, sent: 0 };
+  if (!ids.length) return { today, monthly: 0, overdue: 0, ended: 0, sent: 0 };
   const { data: prefs } = await admin.from("user_prefs").select("user_id,notify").in("user_id", ids);
-  ids = ids.filter((id) => (prefs ?? []).find((x: { user_id: string }) => x.user_id === id)?.notify?.types?.reminder !== false);
-  const { data: subs } = await admin.from("push_subscriptions").select("user_id,endpoint,p256dh,auth").in("user_id", ids);
-  if (dry) return { people: ids.length, devices: subs?.length ?? 0, owing: ids.filter((id) => per[id].owe.length).length, sent: 0 };
+  const out: { uid: string; title: string; body: string; tag: string }[] = [];
+  const count = { monthly: 0, overdue: 0, ended: 0 };
+  for (const id of ids) {
+    const n = (prefs ?? []).find((x: { user_id: string }) => x.user_id === id)?.notify ?? {};
+    const off = (t: string) => n.types && n.types[t] === false;
+    const { owe, get, old, ended } = per[id];
+    const myDay = Number.isInteger(n.day) && n.day >= 1 && n.day <= 28 ? n.day : 1;
+    if ((force === "monthly" || myDay === dom) && !off("reminder") && (owe.length || get.length)) {
+      const lines: string[] = [];
+      if (owe.length) lines.push(`💸 Dlužíš: ${listLine([...owe])}`);
+      if (get.length) lines.push(`💰 Máš dostat: ${listLine([...get])}`);
+      out.push({ uid: id, title: owe.length ? "📅 Čas se vyrovnat" : "📅 Přehled dluhů", body: lines.join("\n"), tag: "reminder" });
+      count.monthly++;
+    }
+    if (old.length && !off("overdue")) {
+      const same = old.every((o) => o.days === old[0].days);
+      out.push({
+        uid: id,
+        title: same ? `⏰ Dluh už visí ${old[0].days} dní` : "⏰ Staré dluhy pořád visí",
+        body: `Dlužíš: ${listLine([...old], !same)}. Vyrovnej to, ať je klid.`,
+        tag: "overdue",
+      });
+      count.overdue++;
+    }
+    if (!off("ended")) {
+      for (const f of ended) {
+        const lines: string[] = [];
+        if (f.owe.length) lines.push(`💸 Dlužíš: ${f.owe.map((i) => `${i.who} ${money(i.amount, i.cur)}`).join(", ")}`);
+        if (f.get.length) lines.push(`💰 Máš dostat: ${f.get.map((i) => `${i.who} ${money(i.amount, i.cur)}`).join(", ")}`);
+        if (!lines.length) lines.push("✅ Jsi se všemi vyrovnaný, nic neřeš.");
+        out.push({ uid: id, title: f.title, body: lines.join("\n"), tag: "ended" });
+        count.ended++;
+      }
+    }
+  }
+  if (!out.length) return { today, ...count, sent: 0 };
+  const { data: subs } = await admin.from("push_subscriptions").select("user_id,endpoint,p256dh,auth").in("user_id", [...new Set(out.map((o) => o.uid))]);
+  if (dry) return { today, ...count, devices: subs?.length ?? 0, sent: 0 };
   webpush.setVapidDetails("https://ruzickavisuals.github.io/vyrovnano/", keys.publicKey, keys.privateKey);
   let sent = 0;
   const dead: string[] = [];
-  await Promise.all((subs ?? []).map(async (s: { user_id: string; endpoint: string; p256dh: string; auth: string }) => {
-    const { owe, get } = per[s.user_id];
-    const lines: string[] = [];
-    if (owe.length) lines.push(`💸 Dlužíš: ${listLine(owe)}`);
-    if (get.length) lines.push(`💰 Máš dostat: ${listLine(get)}`);
-    const payload = JSON.stringify({
-      title: owe.length ? "📅 Nový měsíc, čas se vyrovnat" : "📅 Nový měsíc, přehled dluhů",
-      body: lines.join("\n").slice(0, 300),
-      tag: "reminder",
-    });
-    try {
-      await webpush.sendNotification({ endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } }, payload, { TTL: 3 * 86400 });
-      sent++;
-    } catch (e) {
-      const code = (e as { statusCode?: number }).statusCode;
-      if (code === 404 || code === 410) dead.push(s.endpoint);
+  const jobs: Promise<void>[] = [];
+  for (const o of out) {
+    const payload = JSON.stringify({ title: o.title.slice(0, 80), body: o.body.slice(0, 300), tag: o.tag });
+    for (const s of (subs ?? []).filter((x: { user_id: string }) => x.user_id === o.uid)) {
+      jobs.push((async () => {
+        try {
+          await webpush.sendNotification({ endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } }, payload, { TTL: 3 * 86400 });
+          sent++;
+        } catch (e) {
+          const code = (e as { statusCode?: number }).statusCode;
+          if (code === 404 || code === 410) dead.push(s.endpoint);
+        }
+      })());
     }
-  }));
-  if (dead.length) await admin.from("push_subscriptions").delete().in("endpoint", dead);
-  return { people: ids.length, devices: subs?.length ?? 0, sent };
+  }
+  await Promise.all(jobs);
+  if (dead.length) await admin.from("push_subscriptions").delete().in("endpoint", [...new Set(dead)]);
+  return { today, ...count, devices: subs?.length ?? 0, sent };
 }
 
 export default {
@@ -156,7 +221,7 @@ export default {
         const { data: v } = await a.from("app_secrets").select("value").eq("name", "vapid").maybeSingle();
         if (!v) return Response.json({ people: 0, sent: 0 });
         const b = await req.json().catch(() => ({}));
-        return Response.json(await monthly(a, v.value, String(b.only ?? ""), b.dry === true));
+        return Response.json(await daily(a, v.value, String(b.only ?? ""), b.dry === true, String(b.force ?? "")));
       }
       const me = ctx.userClaims?.id;
       if (!me) return Response.json({ error: "unauthorized" }, { status: 401 });

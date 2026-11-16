@@ -30,6 +30,8 @@ async function rpc(fn, body = {}) {
 export const shared = (g) => ({
   name: g.name, emoji: g.emoji, color: g.color, currency: g.currency, members: g.members,
   entries: g.entries, dead: g.dead || {}, mu: g.mu || 0, log: g.log || [],
+  // Pravidelné výdaje a datum konce akce (jen když jsou nastavené, aby se starší skupiny zbytečně neměnily).
+  rec: g.rec?.length ? g.rec : undefined, ends: g.ends || undefined,
 });
 
 // Stabilní textová podoba pro porovnání (databáze si pořadí klíčů přeskládá).
@@ -75,8 +77,13 @@ export function merge(a, b) {
   for (const m of other.members) {
     if (used.has(m.id) && !members.some((x) => x.id === m.id)) members.push(m);
   }
+  // Pravidelné výdaje a konec akce patří k nastavení skupiny (vyhrává novější). Když jsou obě verze stejně staré
+  // a jedna je nemá (uložila ji starší verze aplikace, která je nezná), vezmeme je z té druhé.
+  const same = (a.mu || 0) === (b.mu || 0);
+  const rec = meta.rec?.length ? meta.rec : same ? other.rec : undefined;
+  const ends = meta.ends || (same ? other.ends : undefined);
   return { name: meta.name, emoji: meta.emoji, color: meta.color, currency: meta.currency, members, entries, dead, mu: meta.mu || 0,
-    log: mergeLog(a.log, b.log) };
+    log: mergeLog(a.log, b.log), rec: rec?.length ? rec : undefined, ends: ends || undefined };
 }
 
 // Data ze serveru mohl upravit kterýkoli člen skupiny, proto jim nevěříme naslepo:
@@ -121,6 +128,26 @@ export function sanitize(d) {
       mv: okId(e.mv) ? e.mv : undefined,
       mvg: okId(e.mvg) ? e.mvg : undefined,
       mvd: e.mvd === 'out' || e.mvd === 'in' ? e.mvd : undefined,
+      // záznam vytvořený automaticky z pravidelného výdaje
+      rid: okId(e.rid) ? e.rid : undefined,
+    }));
+  const isDate = (v) => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v);
+  const rec = (Array.isArray(d.rec) ? d.rec : []).slice(0, 50)
+    .filter((r) => r && okId(r.id) && r.id.length <= 24 && ids.has(r.paidBy) && r.parts && typeof r.parts === 'object' && isDate(r.next))
+    .map((r) => ({
+      id: r.id,
+      kind: ['transfer', 'income'].includes(r.kind) ? r.kind : 'expense',
+      title: str(r.title, 120),
+      amount: Math.max(0, Math.round(num(r.amount))),
+      currency: cur(r.currency),
+      rate: num(r.rate) > 0 ? num(r.rate) : 1,
+      paidBy: r.paidBy,
+      mode: ['equal', 'shares', 'exact'].includes(r.mode) ? r.mode : 'equal',
+      parts: Object.fromEntries(Object.entries(r.parts).filter(([k, v]) => ids.has(k) && Number.isFinite(v) && v > 0)),
+      category: str(r.category, 20),
+      every: r.every === 'week' ? 'week' : 'month',
+      day: Number.isInteger(r.day) && r.day >= 1 && r.day <= 31 ? r.day : 1,
+      next: r.next,
     }));
   const dead = {};
   if (d.dead && typeof d.dead === 'object') {
@@ -133,7 +160,8 @@ export function sanitize(d) {
       a: LOG_ACTS.includes(l.a) ? l.a : 'edit', text: str(l.text, 300) }))
     .sort(logOrder).slice(-LOG_MAX);
   return { name: str(d.name, 80) || 'Skupina', emoji: str(d.emoji, 16) || '👥',
-    color: GROUP_COLORS.includes(d.color) ? d.color : undefined, currency: cur(d.currency), members, entries, dead, mu: num(d.mu), log };
+    color: GROUP_COLORS.includes(d.color) ? d.color : undefined, currency: cur(d.currency), members, entries, dead, mu: num(d.mu), log,
+    rec: rec.length ? rec : undefined, ends: isDate(d.ends) ? d.ends : undefined };
 }
 
 // Otisk sdílené části skupiny – podle něj poznáme, jestli je co synchronizovat.

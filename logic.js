@@ -253,3 +253,47 @@ export function seed() {
     ],
   };
 }
+
+/* ---------- Pravidelné výdaje ---------- */
+const pad = (n) => String(n).padStart(2, '0');
+// Další termín po `date`: o týden později, nebo stejný den v dalším měsíci (31. se v kratším měsíci zkrátí na poslední den).
+export function nextDue(date, every, day) {
+  const [y, m, d] = date.split('-').map(Number);
+  if (every === 'week') {
+    const t = new Date(Date.UTC(y, m - 1, d + 7));
+    return `${t.getUTCFullYear()}-${pad(t.getUTCMonth() + 1)}-${pad(t.getUTCDate())}`;
+  }
+  const ny = m === 12 ? y + 1 : y, nm = m === 12 ? 1 : m + 1;
+  const len = new Date(Date.UTC(ny, nm, 0)).getUTCDate();
+  return `${ny}-${pad(nm)}-${pad(Math.min(day || d, len))}`;
+}
+// Zapíše do skupiny všechny pravidelné výdaje, jejichž termín už nastal, a posune jim další termín.
+// Vrací tutéž skupinu, když není co dělat. Záznam má pevné id (šablona + datum) a pevný čas úpravy,
+// takže když ho ve stejnou chvíli vytvoří dvě zařízení, nezdvojí se, a ručně smazaný se nevrátí.
+export function runRecurring(g, now = today()) {
+  if (!g.rec?.length || !g.rec.some((r) => r.next <= now)) return g;
+  const ids = new Set(g.members.map((m) => m.id));
+  const have = new Set(g.entries.map((e) => e.id));
+  const added = [], log = [];
+  const rec = g.rec.map((r) => {
+    if (r.next > now || !ids.has(r.paidBy)) return r;
+    const parts = Object.fromEntries(Object.entries(r.parts).filter(([k]) => ids.has(k)));
+    let next = r.next;
+    for (let i = 0; i < 36 && next <= now; i++) {
+      const id = `${r.id}-${next.replace(/-/g, '')}`;
+      const t = Date.parse(next + 'T08:00:00Z'); // pevný čas, na všech zařízeních stejný
+      if (Object.keys(parts).length && !have.has(id) && !(g.dead?.[id] >= t)) {
+        have.add(id);
+        added.push({ id, kind: r.kind, title: r.title, amount: r.amount, currency: r.currency, rate: r.rate, paidBy: r.paidBy,
+          mode: r.mode, parts, category: r.category, date: next, u: t, c: t, rid: r.id });
+        log.push({ id: `r${id}`, t, n: 'Automaticky', a: 'add', text: `pravidelný ${r.kind === 'income' ? 'příjem' : r.kind === 'transfer' ? 'převod' : 'výdaj'} „${r.title}“ (${fmt(r.amount, r.currency)})` });
+      }
+      next = nextDue(next, r.every, r.day);
+    }
+    return { ...r, next };
+  });
+  const seen = new Set((g.log || []).map((x) => x.id));
+  if (!rec.some((r, i) => r !== g.rec[i])) return g; // jen šablony s plátcem, který už ve skupině není
+  return { ...g, rec, mu: Date.now(), entries: [...g.entries, ...added],
+    log: [...(g.log || []), ...log.filter((x) => !seen.has(x.id))].sort((a, b) => a.t - b.t).slice(-300) };
+}

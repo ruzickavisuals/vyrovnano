@@ -1,7 +1,7 @@
 import { html, render, useState, useEffect, useLayoutEffect, useMemo, useRef } from './vendor/preact-htm.js';
 import {
   CATS, cat, catOf, guessCategory, CURRENCIES, uid, today, fmt, parseAmount, allocate, baseAmount, shares,
-  balances, settle, stats, debtMove, vocative, toIban, spayd, dateLabel, seed,
+  balances, settle, stats, debtMove, vocative, toIban, spayd, dateLabel, seed, nextDue, runRecurring,
 } from './logic.js';
 import {
   syncEnabled, shared, canon, merge, sanitize, sig, LOG_MAX, listRemote, joinRemote, leaveRemote,
@@ -654,31 +654,79 @@ function Home({ groups, profile, account, activeId, onOpen, onNew, onProfile, on
 /* ---------- Úvodní plocha (když není vybraná skupina) ---------- */
 
 const QUIPS = [
-  ['🤝', 'Dobré účty dělají dobré přátele. Špatné účty dělají pasivně agresivní skupinové chaty.'],
-  ['💸', '„Pošlu ti to večer.“ Nejčastější kec hned po „už jsem na cestě“.'],
-  ['🧾', '„Účet dohromady, rozpočítáme to potom.“ Slavná poslední slova před tím, než se všichni poserou.'],
-  ['🧠', 'Kdo platí, ten si pamatuje. Kdo dluží, má najednou paměť jako zlatá rybka.'],
-  ['🍻', 'Přátelství se pozná podle toho, kdo zaplatí první kolo. Hajzl podle toho, kdo zmizí před posledním.'],
-  ['📮', 'Nikdo nechce být ten otravný kokot, co upomíná. Červené číslo to udělá za tebe.'],
-  ['☕', 'Peníze nejsou všechno. Ale to kafe za 89 Kč ti stejně nedaruju, Karle.'],
-  ['🎯', 'Dnes je krásný den někomu připomenout pětikilo. A zkazit mu ho.'],
-  ['🧮', 'Počítat umí každý. Jen se pak záhadně nikdo nedopočítá. Od toho je tu tahle sračka, co funguje.'],
-  ['🐢', 'Dluh není želva, sám neuteče. Ale dlužník kupodivu běhat umí.'],
-  ['🥂', '„Já měl jenom jedno malý pivo.“ Jasně. A účet za čtyři litry se udělal sám.'],
-  ['🦗', 'Ticho po otázce „kdo ještě neposlal?“ je nejhlasitější zvuk na světě.'],
-  ['🧻', 'Kdo nikdy nekoupil hajzlpapír do společného bytu, ať první hodí kamenem. Nebo radši pošle stovku.'],
-  ['🙃', '„Nemám u sebe hotovost.“ V roce, kdy se dá zaplatit hodinkama, je to už jen výmluva na hovno.'],
-  ['⚖️', 'Rovným dílem je fér jen do chvíle, než si někdo objedná steak a tři negroni.'],
-  ['🏦', 'Nejsem banka. Banka by ti aspoň napočítala úroky a poslala exekutora.'],
-  ['👻', 'Někteří lidi po výplatě ožijí. Jiní se po ní vypaří jak pára nad hrncem.'],
-  ['🫠', 'Dlužit kamarádovi je jako mít kamínek v botě. Jde s tím chodit, ale jsi u toho za debila.'],
-  ['🎁', '„To je dobrý, to neřeš.“ Přeloženo: budu ti to připomínat do smrti.'],
-  ['🚬', 'Půjčit si stovku na cigára a vrátit ji umí jen jeden člověk z deseti. Zbytek devět jsou tví kamarádi.'],
+  ['🤝', 'Dobré účty dělají dobré přátele. Špatné účty dělají ze skupinového chatu žumpu.'],
+  ['💸', '„Pošlu ti to večer.“ Největší kec hned po „už jsem na cestě“ a „dám si jen jedno“.'],
+  ['🧾', '„Účet dohromady, rozpočítáme to potom.“ Slavná poslední slova, než se všichni poserou.'],
+  ['🧠', 'Kdo platí, ten si to pamatuje do smrti. Kdo dluží, má najednou v hlavě nasráno.'],
+  ['🍻', 'Kamarád se pozná podle toho, že zaplatí první kolo. Zmrd podle toho, že zmizí před posledním.'],
+  ['📮', 'Nikdo nechce být ten otravný kokot, co upomíná. Červené číslo to řekne za tebe a bez emocí.'],
+  ['☕', 'Peníze nejsou všechno. Ale to kafe za 89 Kč ti stejně nedaruju, ty vyžírko.'],
+  ['🎯', 'Dnes je krásný den někomu připomenout pětikilo a posrat mu tím náladu.'],
+  ['🧮', 'Počítat umí každý. Dopočítat se nikdo. A pak se všichni tváří, že je to v prdeli samo.'],
+  ['🐢', 'Dluh není želva, sám neuteče. Zato dlužník umí zdrhat jak namydlenej blesk.'],
+  ['🥂', '„Já měl jenom jedno malý.“ Jasně, vole. A účet na dva litry se vychlastal sám.'],
+  ['🦗', 'Ticho po otázce „kdo ještě neposlal?“ je nejhlasitější zvuk ve vesmíru.'],
+  ['🧻', 'Kdo nikdy nekoupil hajzlpapír do společného bytu, ať si příště vytře prdel účtenkou.'],
+  ['🙃', '„Nemám u sebe hotovost.“ V době, kdy zaplatíš i hodinkama, je to výmluva úplně na hovno.'],
+  ['⚖️', 'Rovným dílem je fér přesně do chvíle, než si nějakej chytrák objedná steak a tři negroni.'],
+  ['🏦', 'Nejsem banka. Banka by ti aspoň napařila úroky a poslala na tebe exekutora.'],
+  ['👻', 'Někdo po výplatě ožije. Někdo se po ní vypaří jak prd ve větru.'],
+  ['🫠', 'Dlužit kámošovi je jako mít kamínek v botě. Chodit se s tím dá, ale vypadáš u toho jak debil.'],
+  ['🎁', '„To je dobrý, to neřeš.“ Přeloženo: budu ti to předhazovat až do důchodu.'],
+  ['🚬', 'Půjčit si kilo na cigára umí každej. Vrátit ho, to už je vyšší dívčí.'],
+  ['🍕', 'Poslední kousek pizzy si vzal ten, kdo na ni dal nejmíň. Tak to prostě chodí, do prdele.'],
+  ['🧾', 'Kdo řekne „to se nějak srovná“, ten to nikdy nesrovnal. Nikdy. Ani jednou.'],
+  ['💩', 'Dluh je jako hovno na botě. Čím dýl ho neřešíš, tím víc smrdí celé partě.'],
+  ['🕵️', 'Všichni vědí, kdo dluží. Jen ten jeden čurák dělá, že o ničem neví.'],
+  ['🛒', '„Vezmu to kartou a pak mi to pošlete.“ A tak začíná každá finanční tragédie.'],
+  ['🍾', 'Objednat lahev pro celej stůl je frajeřina. Ráno chtít po všech stovku je zasraná realita.'],
+  ['📉', 'Tvoje kreditní skóre u kamarádů právě padá rychlejc než kurz koruny.'],
+  ['🧙', 'Zaplatit hned je kouzlo, který většina lidí neovládá. Buď čaroděj, ne kretén.'],
+  ['🐖', 'Kdo žere za tři a platí za jednoho, tomu se říká kamarád. Zatím.'],
+  ['⏳', '„Do konce týdne to máš.“ Neřekl kterýho týdne, zmetek jeden.'],
 ];
+
+// Hlášky na míru částce: kolik čeho by za ty peníze bylo. [cena v Kč, co] – ve 4. pádě za „N×“.
+const THINGS = [
+  [55, 'panák rumu na ex'], [62, 'pivo v hospodě'], [85, 'flat white v hipsterský kavárně'], [120, 'lahev vína z večerky'],
+  [150, 'krabička cigaret'], [165, 'kebab ve tři ráno'], [189, 'avokádovej toast pro snoby'], [230, 'Uber domů, protože se ti nechce jít pěšky'],
+  [259, 'měsíc Netflixu'], [270, 'lístek do kina i s předraženým popcornem'], [450, 'pořádnej burger s pivem'], [990, 'permanentka do fitka, kam stejně nechodíš'],
+  [1500, 'hodina u psychologa (hodila by se)'], [1900, 'plná nádrž'], [2800, 'letenka někam, kde tě nikdo nezná'], [4500, 'víkend na chalupě s partou'],
+  [9000, 'lyžák v Alpách'], [25000, 'novej iPhone'], [60000, 'ojetá fabie'],
+];
+const OWE_QUIPS = [
+  (s, t) => `Dlužíš ${s}. To je ${t}. Tak si to kurva odpusť a pošli prachy.`,
+  (s, t) => `${s} dluhu = ${t}. Vyser se na to a zaplať, než ti začnou chodit pasivně agresivní smajlíky.`,
+  (s, t) => `Za těch ${s}, co dlužíš, by bylo ${t}. Jenže ty prachy nejsou tvoje, kámo.`,
+  (s, t) => `Visíš ${s}. Stačí si odpustit ${t} a jsi z toho venku, ty škrte.`,
+  (s, t) => `${s}. Přesně tolik stojí ${t} a tvoje pověst. Zaplať to, do prdele.`,
+  (s, t) => `Tvůj dluh ${s} je ${t}. Někdo to zatáhl za tebe a už ho to sere.`,
+];
+const GET_QUIPS = [
+  (s, t) => `Lidi ti visí ${s}. To je ${t}, co si teď kvůli těm zmrdům nedáš.`,
+  (s, t) => `${s} venku. Za to by bylo ${t}. Tak jim sakra napiš.`,
+  (s, t) => `Čekáš na ${s}. Mezitím si za ně někdo dává ${t}. Za tvoje, vole.`,
+  (s, t) => `Dluží ti ${s}, což je ${t}. Buď hodnej, ale ne blbej.`,
+  (s, t) => `${s} v cizích kapsách = ${t}. Charita je hezká věc, ale tohle je krádež s úsměvem.`,
+  (s, t) => `Za ${s}, co ti dluží, by bylo ${t}. Připomeň se, nejsi zasranej bankomat.`,
+];
+// Vybere hlášku: když něco dlužíš nebo ti dluží v korunách, většinou tu na míru částce.
+function pickQuip(totals) {
+  const any = () => QUIPS[Math.floor(Math.random() * QUIPS.length)];
+  const czk = totals.CZK || 0;
+  const kc = Math.abs(czk) / 100;
+  if (kc < 50 || Math.random() < 0.25) return any();
+  // Jen přirovnání, která na částku opravdu sedí (odchylka do 15 %).
+  const fit = THINGS.map(([price, what]) => [Math.round(kc / price), what, kc / price])
+    .filter(([n, , exact]) => n >= 1 && n <= 12 && Math.abs(exact - n) / exact <= 0.15);
+  if (!fit.length) return any();
+  const [n, what] = fit[Math.floor(Math.random() * fit.length)];
+  const list = czk < 0 ? OWE_QUIPS : GET_QUIPS;
+  return [czk < 0 ? '💸' : '🤑', list[Math.floor(Math.random() * list.length)](fmt(Math.abs(czk), 'CZK'), `${n}× ${what}`)];
+}
 
 // Pozdrav, celkový stav přes všechny skupiny a náhodná hláška (vybraná jednou při zobrazení).
 function useWelcome(groups, name) {
-  const quip = useMemo(() => QUIPS[Math.floor(Math.random() * QUIPS.length)], []);
   const hour = new Date().getHours();
   const hello = hour < 5 ? 'Dobrou noc' : hour < 10 ? 'Dobré ráno' : hour < 18 ? 'Ahoj' : 'Dobrý večer';
   const totals = {};
@@ -686,6 +734,8 @@ function useWelcome(groups, name) {
     const my = balances(g)[g.me] || 0;
     if (my) totals[g.currency] = (totals[g.currency] || 0) + my;
   }
+  // Hláška se vybere jednou při zobrazení; při změně celkového dluhu se vybere nová, aby částka seděla.
+  const quip = useMemo(() => pickQuip(totals), [totals.CZK || 0]);
   const lines = Object.entries(totals).filter(([, v]) => v);
   const sum = groups.length === 0
     ? html`Zatím tu nemáš žádnou skupinu. Vytvoř první.`
@@ -1120,7 +1170,9 @@ function Stats({ group, st }) {
 
 /* ---------- Formulář výdaje / převodu ---------- */
 
-function EntryForm({ group, entry, onSave, onDelete }) {
+function EntryForm({ group, entry, repeat, onSave, onDelete }) {
+  // Opakování jde nastavit jen u nového záznamu: '' = jednorázově, jinak každý týden / měsíc.
+  const [every, setEvery] = useState(repeat || '');
   // Neaktivní členy nabízíme jen u starých záznamů, ve kterých figurují.
   const members = group.members.filter((m) => !m.inactive || (entry && (entry.paidBy === m.id || m.id in entry.parts)));
   const init = entry || {
@@ -1190,10 +1242,10 @@ function EntryForm({ group, entry, onSave, onDelete }) {
     if (error) return;
     const common = { id: entry?.id || uid(), amount, currency, rate, paidBy, date };
     if (kind === 'transfer') {
-      onSave({ ...common, kind, title: 'Převod', mode: 'equal', category: 'other', parts: { [to]: 1 } });
+      onSave({ ...common, kind, title: 'Převod', mode: 'equal', category: 'other', parts: { [to]: 1 } }, every);
     } else {
       const clean = Object.fromEntries(Object.entries(weights).filter(([, v]) => v > 0));
-      onSave({ ...common, kind, title: title.trim() || cat(category).n, mode, category, parts: clean });
+      onSave({ ...common, kind, title: title.trim() || cat(category).n, mode, category, parts: clean }, every);
     }
   }
 
@@ -1280,8 +1332,16 @@ function EntryForm({ group, entry, onSave, onDelete }) {
         </div>
       `}
 
+      ${!entry && html`
+        <div class="field">
+          <span>Opakování</span>
+          <${Seg} value=${every} onChange=${setEvery} options=${[['', 'Jednorázově'], ['week', 'Každý týden'], ['month', 'Každý měsíc']]} />
+          ${every && html`<small class="muted">${every === 'week'
+            ? `Zapíše se teď a pak sám každý týden (další ${dateLabel(nextDue(date, 'week'))}).`
+            : `Zapíše se teď a pak sám každý měsíc vždy ${Number(date.slice(8))}. (další ${dateLabel(nextDue(date, 'month'))}).`} Zrušíš to v úpravě skupiny → Pravidelné výdaje.</small>`}
+        </div>`}
       ${entry && html`<${EntryStamp} group=${group} entry=${entry} />`}
-      <button class="btn primary wide" disabled=${!!error}>${error || (entry ? 'Uložit změny' : 'Přidat')}</button>
+      <button class="btn primary wide" disabled=${!!error}>${error || (entry ? 'Uložit změny' : every ? 'Přidat a opakovat' : 'Přidat')}</button>
       ${entry && html`<button type="button" class="btn danger wide" onClick=${onDelete}>Smazat</button>`}
     </form>
   `;
@@ -1289,7 +1349,8 @@ function EntryForm({ group, entry, onSave, onDelete }) {
 
 /* ---------- Formulář skupiny ---------- */
 
-function GroupForm({ group, profile, userId, admin, deleteLabel, onSave, onDelete, onBackups, onWho }) {
+function GroupForm({ group, profile, userId, admin, deleteLabel, onSave, onDelete, onBackups, onWho, onRec }) {
+  const [ends, setEnds] = useState(group?.ends || '');
   const [name, setName] = useState(group?.name || '');
   const [emoji, setEmoji] = useState(group?.emoji || '👥');
   const [color, setColor] = useState(group?.color || 'teal');
@@ -1311,6 +1372,7 @@ function GroupForm({ group, profile, userId, admin, deleteLabel, onSave, onDelet
     onSave({
       ...(group || {}), id: group?.id || uid(), entries: group?.entries || [],
       name: name.trim(), emoji, color, currency, members: ms, me: ms.some((m) => m.id === me) ? me : ms[0].id,
+      ends: ends || undefined,
     });
   }
 
@@ -1338,6 +1400,16 @@ function GroupForm({ group, profile, userId, admin, deleteLabel, onSave, onDelet
           options=${CURRENCIES.map((c) => [c, c])} />
         ${group?.entries.length ? html`<small class="muted">Měnu nejde změnit, skupina už má výdaje.</small>` : ''}
       </label>
+
+      <div class="field">
+        <span>Konec akce</span>
+        <label class="check">
+          <input type="checkbox" checked=${!!ends} onChange=${(e) => setEnds(e.target.checked ? today() : '')} />
+          <span>Skupina má datum konce (dovolená, výlet, akce)</span>
+        </label>
+        ${ends && html`<${DateField} value=${ends} onChange=${setEnds} />`}
+        <small class="muted">${ends ? 'Den po konci přijde všem členům notifikace s vyúčtováním: kdo komu kolik dluží.' : 'Hodí se pro jednorázové akce. U běžné domácnosti nech vypnuté.'}</small>
+      </div>
 
       <div class="field"><span>Členové</span></div>
       <div class="card list">
@@ -1373,10 +1445,40 @@ function GroupForm({ group, profile, userId, admin, deleteLabel, onSave, onDelet
         <button type="button" class="btn link wide" onClick=${onWho}>Jsem ve skupině někdo jiný · změnit, kdo jsem</button>`}
 
       <button class="btn primary wide" disabled=${!!error}>${error || (group ? 'Uložit' : 'Vytvořit skupinu')}</button>
+      ${group && onRec && html`<button type="button" class="btn wide" onClick=${onRec}>🔁 Pravidelné výdaje${group.rec?.length ? ` (${group.rec.length})` : ''}</button>`}
       ${group && html`<button type="button" class="btn wide" onClick=${onBackups}>Zálohy a export</button>`}
       ${group && html`<button type="button" class="btn danger wide" onClick=${onDelete}>${deleteLabel}</button>`}
     </form>
   `;
+}
+
+/* ---------- Pravidelné výdaje ---------- */
+
+const WEEKDAYS = ['neděli', 'pondělí', 'úterý', 'středu', 'čtvrtek', 'pátek', 'sobotu'];
+function RecSheet({ group, onAdd, onRemove }) {
+  const list = group.rec || [];
+  return html`
+    <div class="form">
+      <p class="hint">Nájem, internet, Netflix… Zapíšou se samy v daný den, nikdo na ně nemusí myslet. Nový přidáš i přímo v okně „Nový záznam“ volbou Opakování.</p>
+      ${list.length === 0 && html`<p class="hint center">Zatím tu žádný pravidelný výdaj není.</p>`}
+      ${list.length > 0 && html`
+        <div class="card list">
+          ${list.map((r) => html`
+            <div class="row rec-row" key=${r.id}>
+              <span class="avatar">${r.kind === 'transfer' ? '💸' : r.kind === 'income' ? '💰' : cat(r.category).e}</span>
+              <span class="grow">
+                <strong>${r.title}</strong>
+                <small class="muted">${r.every === 'week'
+                  ? `každý týden v ${WEEKDAYS[new Date(r.next + 'T12:00').getDay()]}`
+                  : `každý měsíc vždy ${r.day}.`} · platí ${nameOf(group, r.paidBy)}</small>
+                <small class="muted">další ${dateLabel(r.next)}</small>
+              </span>
+              <span class="right"><strong>${fmt(r.amount, r.currency)}</strong></span>
+              <button type="button" class="icon-btn" title="Zrušit opakování" aria-label="Zrušit opakování" onClick=${() => onRemove(r)}><${Icon} name="close" size=${16} /></button>
+            </div>`)}
+        </div>`}
+      <button type="button" class="btn primary wide" onClick=${onAdd}>+ Nový pravidelný výdaj</button>
+    </div>`;
 }
 
 /* ---------- QR kódy ---------- */
@@ -1818,7 +1920,7 @@ function EntryStamp({ group, entry }) {
   return html`
     <p class="hint stamp">
       ${entry.c
-        ? html`${who ? `Zadal(a) ${who}` : 'Zadáno'} <strong>${logTime(entry.c)}</strong>${edited ? html` · naposledy upraveno <strong>${logTime(entry.u)}</strong>` : ''}`
+        ? html`${entry.rid && !who ? 'Zapsáno automaticky (pravidelný výdaj), termín' : who ? `Zadal(a) ${who}` : 'Zadáno'} <strong>${logTime(entry.c)}</strong>${edited ? html` · naposledy upraveno <strong>${logTime(entry.u)}</strong>` : ''}`
         : html`Naposledy uloženo <strong>${logTime(entry.u)}</strong>. Přesný čas zadání se u starších záznamů neukládal.`}
     </p>`;
 }
@@ -2058,13 +2160,13 @@ function PushSettings() {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
   // Co má chodit: platí pro účet (všechna jeho zařízení) a filtruje to server.
-  const [prefs, setPrefs] = useState({ scope: 'mine', types: {} });
+  const [prefs, setPrefs] = useState({ scope: 'mine', types: {}, day: 1 });
   useEffect(() => { pushState().then(setState).catch(() => setState('unsupported')); }, []);
   useEffect(() => {
-    getNotifyPrefs().then((p) => setPrefs({ scope: p?.scope === 'all' ? 'all' : 'mine', types: p?.types || {} })).catch(() => {});
+    getNotifyPrefs().then((p) => setPrefs({ scope: p?.scope === 'all' ? 'all' : 'mine', types: p?.types || {}, day: Number.isInteger(p?.day) && p.day >= 1 && p.day <= 28 ? p.day : 1 })).catch(() => {});
   }, []);
   const change = (next) => { setPrefs(next); setNotifyPrefs(next).catch(() => setMsg('Volbu se nepodařilo uložit. Zkus to prosím znovu.')); };
-  const KINDS = [['entry', 'Nové a upravené výdaje'], ['deleted', 'Smazané záznamy'], ['paid', 'Úhrady a převody dluhů'], ['joined', 'Noví členové skupiny'], ['reminder', 'Měsíční připomínka dluhů (1. den v měsíci)']];
+  const KINDS = [['entry', 'Nové a upravené výdaje'], ['deleted', 'Smazané záznamy'], ['paid', 'Úhrady a převody dluhů'], ['joined', 'Noví členové skupiny'], ['reminder', 'Měsíční přehled dluhů'], ['overdue', 'Upomínka na starý dluh (po 30 dnech)'], ['ended', 'Vyúčtování po konci akce']];
   async function toggle() {
     setBusy(true);
     setMsg('');
@@ -2095,7 +2197,7 @@ function PushSettings() {
               ${busy ? 'Moment…' : state === 'on' ? 'Vypnout' : 'Zapnout'}
             </button>
           </div>
-          <p class="hint">${msg || 'Dostaneš zprávu, když někdo ve tvé skupině přidá, upraví nebo smaže výdaj, uhradí dluh nebo se připojí. Vlastní změny ti nechodí. Prvního v měsíci ti navíc přijde přehled, komu dlužíš a kdo dluží tobě.'}</p>
+          <p class="hint">${msg || 'Dostaneš zprávu, když někdo ve tvé skupině přidá, upraví nebo smaže výdaj, uhradí dluh nebo se připojí. Vlastní změny ti nechodí. Jednou měsíčně ti navíc přijde přehled, komu dlužíš a kdo dluží tobě.'}</p>
           <div class="field">
             <span>Co mi má chodit</span>
             <${Seg} value=${prefs.scope} onChange=${(scope) => change({ ...prefs, scope })}
@@ -2112,6 +2214,13 @@ function PushSettings() {
                 <span>${label}</span>
               </label>`)}
           </div>
+          ${prefs.types.reminder !== false && html`
+            <div class="field">
+              <span>Den měsíčního přehledu</span>
+              <${Select} label="Den měsíčního přehledu" value=${String(prefs.day)} onChange=${(d) => change({ ...prefs, day: Number(d) })}
+                options=${Array.from({ length: 28 }, (_, i) => [String(i + 1), `${i + 1}. den v měsíci`])} />
+              <small class="muted">Nastav si ho třeba na den po výplatě. Přijde dopoledne.</small>
+            </div>`}
           ${state === 'on' && html`<button class="btn wide" disabled=${busy} onClick=${async () => {
             setBusy(true);
             try {
@@ -2579,11 +2688,12 @@ function App({ user, recovery }) {
       }
       for (const m of before.members) if (!now.has(m.id)) ch.push(`odebrán člen ${m.name}`);
       if (before.emoji !== out.emoji || before.color !== out.color) ch.push('vzhled skupiny');
+      if ((before.ends || '') !== (out.ends || '')) ch.push(out.ends ? `konec akce ${dateLabel(out.ends)}` : 'zrušen konec akce');
       if (ch.length) out = logged(out, 'group', `upravena skupina: ${ch.join(', ')}`);
     }
     putGroup(out);
   }
-  const saveEntry = (e, note, type = 'entry', push = null) => {
+  const saveEntry = (e, note, type = 'entry', push = null, every = '') => {
     const old = group.entries.find((x) => x.id === e.id);
     const now = Date.now();
     // c = kdy byl záznam zadán, cb = kdo ho zadal; při úpravách se nemění.
@@ -2603,8 +2713,35 @@ function App({ user, recovery }) {
     const changes = has ? entryChanges(group, old, e) : [];
     const base = !has ? logged(group, e.kind === 'transfer' ? 'pay' : 'add', text)
       : changes.length ? logged(group, 'edit', `${text}: ${changes.join(', ')}`) : group;
-    putGroup({ ...base, entries: has ? group.entries.map((x) => (x.id === e.id ? entry : x)) : [...group.entries, entry] });
+    let out = { ...base, entries: has ? group.entries.map((x) => (x.id === e.id ? entry : x)) : [...group.entries, entry] };
+    // Nový záznam s opakováním: uloží se i jako šablona, podle které se další zapíšou samy.
+    if (!has && (every === 'week' || every === 'month')) {
+      const day = Number(e.date.slice(8));
+      const r = { id: uid(), kind: e.kind, title: e.title, amount: e.amount, currency: e.currency, rate: e.rate, paidBy: e.paidBy,
+        mode: e.mode, parts: e.parts, category: e.category, every, day, next: nextDue(e.date, every, day) };
+      out = { ...logged(out, 'group', `nastaveno opakování „${e.title}“ (${fmt(e.amount, e.currency)}, ${every === 'week' ? 'každý týden' : 'každý měsíc'})`),
+        rec: [...(out.rec || []), r].slice(-50), mu: now };
+    }
+    putGroup(out);
   };
+  async function removeRec(r) {
+    if (!(await ask(`Zrušit opakování „${r.title}“ (${fmt(r.amount, r.currency)})? Už zapsané záznamy zůstanou, nové se přestanou přidávat.`, { ok: 'Zrušit opakování' }))) return;
+    setGroups((gs) => gs.map((g) => (g.id !== group.id ? g : {
+      ...logged(g, 'group', `zrušeno opakování „${r.title}“ (${fmt(r.amount, r.currency)})`),
+      rec: (g.rec || []).filter((x) => x.id !== r.id), mu: Date.now(),
+    })));
+  }
+  // Pravidelné výdaje, jejichž den už nastal, se zapíšou samy: při každé změně dat a při návratu do aplikace.
+  useEffect(() => {
+    const run = () => setGroups((gs) => {
+      const next = gs.map((g) => runRecurring(g));
+      return next.some((g, i) => g !== gs[i]) ? next : gs;
+    });
+    run();
+    const vis = () => { if (!document.hidden) run(); };
+    document.addEventListener('visibilitychange', vis);
+    return () => document.removeEventListener('visibilitychange', vis);
+  }, [groups]);
   // Mazání a zápis platby jsou špatně vratné, proto se vždy ptáme.
   async function deleteEntry(id) {
     const e = group.entries.find((x) => x.id === id);
@@ -2884,20 +3021,26 @@ function App({ user, recovery }) {
           <${GroupForm} group=${sheet.group} profile=${prof} userId=${user?.id} admin=${admin} onSave=${saveGroupForm}
             onWho=${sheet.group ? () => setSheet({ type: 'who' }) : null}
             deleteLabel=${!user ? 'Smazat skupinu' : sheet.group?.members.some((m) => m.uid && m.uid !== user.id) ? 'Opustit skupinu' : 'Smazat skupinu'}
-            onDelete=${() => removeGroup(sheet.group)} onBackups=${() => setSheet({ type: 'backups' })} />
+            onDelete=${() => removeGroup(sheet.group)} onBackups=${() => setSheet({ type: 'backups' })}
+            onRec=${sheet.group ? () => setSheet({ type: 'rec' }) : null} />
         <//>`}
       ${sheet?.type === 'entry' && group && html`
         <${Sheet} title=${sheet.entry?.mv ? 'Převedený dluh' : sheet.entry ? 'Upravit záznam' : 'Nový záznam'} onClose=${close}>
           ${sheet.entry?.mv
             ? html`<${MovedInfo} group=${group} entry=${sheet.entry} other=${groups.find((g) => g.id === sheet.entry.mvg)}
                 onDelete=${() => deleteEntry(sheet.entry.id)} />`
-            : html`<${EntryForm} group=${group} entry=${sheet.entry} onSave=${saveEntry} onDelete=${() => deleteEntry(sheet.entry.id)} />`}
+            : html`<${EntryForm} group=${group} entry=${sheet.entry} repeat=${sheet.repeat}
+                onSave=${(e, every) => saveEntry(e, undefined, 'entry', null, every)} onDelete=${() => deleteEntry(sheet.entry.id)} />`}
         <//>`}
       ${sheet?.type === 'entries' && group && html`
         <${Sheet} title="Všechny záznamy" onClose=${() => setSheet(null)}>
           <${AllEntries} group=${group} keep=${allKeep}
             onEntry=${(entry) => setSheet({ type: 'entry', entry, back: 'entries' })}
             onDelete=${(entry) => deleteEntry(entry.id)} />
+        <//>`}
+      ${sheet?.type === 'rec' && group && html`
+        <${Sheet} title="Pravidelné výdaje" onClose=${close}>
+          <${RecSheet} group=${group} onAdd=${() => setSheet({ type: 'entry', repeat: 'month', back: 'rec' })} onRemove=${removeRec} />
         <//>`}
       ${sheet?.type === 'log' && group && html`
         <${Sheet} title="Historie úprav" onClose=${close}>
