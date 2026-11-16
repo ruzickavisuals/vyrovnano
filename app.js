@@ -142,11 +142,19 @@ function tick() {
   } catch {}
 }
 const IS_IOS = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+// Od iOS 26.5 přepínač ťukne jen při skutečném dotyku, ne na pokyn z kódu. Proto do důležitých tlačítek
+// vkládáme neviditelný přepínač přes celou plochu (hx): prst ve skutečnosti klepne na něj, iPhone ťukne
+// a klepnutí normálně doputuje k tlačítku. Druhé, odvozené klepnutí na přepínač zastavíme, aby se akce neprovedla dvakrát.
+const stopClick = (e) => e.stopPropagation();
+const hx = () => (IS_IOS
+  ? html`<label class="hx" aria-hidden="true"><input type="checkbox" switch=${true} tabindex="-1" onClick=${stopClick} /></label>`
+  : null);
+// Odezva vyvolaná z kódu: na Androidu běžná vibrace; na iPhonu jen tam, kde není tlačítko s hx
+// (přejetí prstem v návodu) – a i tam funguje jen do iOS 26.4.
 function haptic(kind = 'light') {
   try {
-    if (!IS_IOS) { if (navigator.vibrate) navigator.vibrate(kind === 'success' ? [12, 60, 18] : 10); return; }
-    tick();
-    if (kind === 'success') setTimeout(tick, 110);
+    if (IS_IOS) { if (kind === 'swipe') tick(); return; }
+    if (navigator.vibrate) navigator.vibrate(kind === 'success' ? [12, 60, 18] : 10);
   } catch {}
 }
 
@@ -309,7 +317,7 @@ function Seg({ options, value, onChange }) {
   return html`
     <div class="seg">
       ${options.map(([v, label]) => html`
-        <button type="button" class=${v === value ? 'on' : ''} onClick=${() => { if (v !== value) haptic(); onChange(v); }}>${label}</button>
+        <button type="button" class=${v === value ? 'on' : ''} onClick=${() => { if (v !== value) haptic(); onChange(v); }}>${label}${hx()}</button>
       `)}
     </div>
   `;
@@ -1136,7 +1144,7 @@ function Debts({ group, bal, onPay, onQr, onMove }) {
                   <span class="pay-who end"><span>${nameOf(group, p.to)}</span><${Avatar} m=${group.members.find((m) => m.id === p.to)} size=${40} /></span>
                 </div>
                 <div class="pay-actions">
-                  <button class="btn small primary" onClick=${() => onPay({ ...p, iban })}>Vyrovnat</button>
+                  <button class="btn small primary" onClick=${() => onPay({ ...p, iban })}>Vyrovnat${hx()}</button>
                 </div>
                 ${onMove && html`<button class="link-btn pay-move" onClick=${() => onMove(p)}>Převést dluh do jiné skupiny</button>`}
               </div>
@@ -1368,7 +1376,7 @@ function EntryForm({ group, entry, repeat, onSave, onDelete }) {
             : `Zapíše se teď a pak sám každý měsíc vždy ${Number(date.slice(8))}. (další ${dateLabel(nextDue(date, 'month'))}).`} Zrušíš to v úpravě skupiny → Pravidelné výdaje.</small>`}
         </div>`}
       ${entry && html`<${EntryStamp} group=${group} entry=${entry} />`}
-      <button class="btn primary wide" disabled=${!!error}>${error || (entry ? 'Uložit změny' : every ? 'Přidat a opakovat' : 'Přidat')}</button>
+      <button class="btn primary wide" disabled=${!!error}>${error || (entry ? 'Uložit změny' : every ? 'Přidat a opakovat' : 'Přidat')}${hx()}</button>
       ${entry && html`<button type="button" class="btn danger wide" onClick=${onDelete}>Smazat</button>`}
     </form>
   `;
@@ -1614,7 +1622,7 @@ function PaySheet({ group, pay, onSave }) {
         <${DateField} value=${date} onChange=${setDate} />
       </label>
       <button class="btn done wide" disabled=${!amount} onClick=${() => onSave({ amount, via, date })}>
-        ${amount ? `Zapsat platbu ${fmt(amount, cur)}` : 'Zapsat platbu'}
+        ${amount ? `Zapsat platbu ${fmt(amount, cur)}` : 'Zapsat platbu'}${hx()}
       </button>
       <p class="hint center">Aplikace sama peníze neposílá. Zapsáním se platba uloží do historie a dluh se všem ve skupině sníží.</p>
     </div>
@@ -2168,7 +2176,7 @@ function Tour({ canGroup, demo, onDone }) {
   const onScroll = () => {
     const el = track.current;
     const n = Math.round(el.scrollLeft / el.clientWidth);
-    if (n !== i) { setI(n); haptic(); }
+    if (n !== i) { setI(n); haptic('swipe'); }
   };
   useEffect(() => {
     const key = (e) => { if (e.key === 'ArrowRight') go(i + 1); else if (e.key === 'ArrowLeft') go(i - 1); };
@@ -2230,7 +2238,7 @@ function Tour({ canGroup, demo, onDone }) {
           <p>${push === 'on'
             ? 'Paráda. Ozveme se jen s tím, co se týká tebe. Podrobnosti doladíš v Účet → Notifikace.'
             : 'Nový výdaj, splátka nebo připomínka, že je čas se vyrovnat. Chodí jen to, co se týká tebe.'}</p>
-          ${push === 'off' && html`<button class="btn primary wide tour-cta" disabled=${busy} onClick=${enable}>${busy ? 'Moment…' : '🔔 Zapnout notifikace'}</button>`}
+          ${push === 'off' && html`<button class="btn primary wide tour-cta" disabled=${busy} onClick=${enable}>${busy ? 'Moment…' : '🔔 Zapnout notifikace'}${hx()}</button>`}
           ${push === 'denied' && html`<p class="hint">Notifikace jsou zakázané v nastavení zařízení. Povolíš je tam a pak v Účet → Notifikace.</p>`}
           ${push === 'unsupported' && html`<p class="hint">${needsInstall
             ? 'Na iPhonu fungují notifikace jen v aplikaci přidané na plochu: v Safari klepni na Sdílet → Přidat na plochu a otevři Vyrovnáno odtamtud.'
@@ -2245,14 +2253,14 @@ function Tour({ canGroup, demo, onDone }) {
           </div>
           <h2>5. Máš to v bezpečí</h2>
           <p>Jde o peníze, tak účet zamkni pořádně. Dvoufázové ověření zapneš v Účet → Účet a zabezpečení.</p>
-          <button class="btn primary wide tour-cta" onClick=${() => onDone(canGroup ? 'group' : '')}>${canGroup ? 'Vytvořit první skupinu' : 'Hotovo, jdeme na to'}</button>
+          <button class="btn primary wide tour-cta" onClick=${() => onDone(canGroup ? 'group' : '')}>${canGroup ? 'Vytvořit první skupinu' : 'Hotovo, jdeme na to'}${hx()}</button>
           ${!demo && html`<button class="btn link wide" onClick=${() => onDone('security')}>Zapnout dvoufázové ověření</button>`}
         </section>
       </div>
       <div class="tour-nav">
-        <button class="btn small" disabled=${i === 0} onClick=${() => go(i - 1)} aria-label="Zpět">‹</button>
+        <button class="btn small" disabled=${i === 0} onClick=${() => go(i - 1)} aria-label="Zpět">‹${hx()}</button>
         <div class="tour-dots" aria-hidden="true">${Array.from({ length: N }, (_, n) => html`<i class=${n === i ? 'on' : ''} onClick=${() => go(n)}></i>`)}</div>
-        <button class="btn small primary" disabled=${last} onClick=${() => go(i + 1)} aria-label="Další">›</button>
+        <button class="btn small primary" disabled=${last} onClick=${() => go(i + 1)} aria-label="Další">›${hx()}</button>
       </div>
     </div>`;
 }
@@ -3206,13 +3214,13 @@ function App({ user, recovery }) {
       </div>
 
 <nav class="tabbar" aria-label="Hlavní nabídka">
-        <button class=${!group && !sheet ? 'on' : ''} onClick=${() => { setSheet(null); setGid(null); }}><${Icon} name="home" /><span>Skupiny</span></button>
-        <button class=${sheet?.type === 'search' ? 'on' : ''} onClick=${() => setSheet({ type: 'search', all: !group })}><${Icon} name="search" /><span>Hledat</span></button>
+        <button class=${!group && !sheet ? 'on' : ''} onClick=${() => { setSheet(null); setGid(null); }}><${Icon} name="home" /><span>Skupiny</span>${hx()}</button>
+        <button class=${sheet?.type === 'search' ? 'on' : ''} onClick=${() => setSheet({ type: 'search', all: !group })}><${Icon} name="search" /><span>Hledat</span>${hx()}</button>
         <button class="add" aria-label=${group ? 'Přidat záznam' : 'Nová skupina'} onClick=${() => setSheet(group ? { type: 'entry' } : { type: 'group' })}>
-          <span class="plus"><${Icon} name="plus" size=${26} /></span><span>${group ? 'Záznam' : 'Skupina'}</span>
+          <span class="plus"><${Icon} name="plus" size=${26} /></span><span>${group ? 'Záznam' : 'Skupina'}</span>${hx()}
         </button>
-        <button class=${sheet?.type === 'alldebts' ? 'on' : ''} onClick=${() => setSheet({ type: 'alldebts' })}><${Icon} name="swap" /><span>Dluhy</span></button>
-        <button class=${sheet?.type === 'profile' ? 'on' : ''} onClick=${() => setSheet({ type: 'profile' })}><${Icon} name="user" /><span>Účet</span></button>
+        <button class=${sheet?.type === 'alldebts' ? 'on' : ''} onClick=${() => setSheet({ type: 'alldebts' })}><${Icon} name="swap" /><span>Dluhy</span>${hx()}</button>
+        <button class=${sheet?.type === 'profile' ? 'on' : ''} onClick=${() => setSheet({ type: 'profile' })}><${Icon} name="user" /><span>Účet</span>${hx()}</button>
       </nav>
 
       ${sheet?.type === 'group' && html`
