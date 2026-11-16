@@ -15,15 +15,20 @@ export const CATS = [
   { id: 'fun', e: '🎉', n: 'Zábava' },
   { id: 'gifts', e: '🎁', n: 'Dárky' },
   { id: 'health', e: '💊', n: 'Zdraví' },
+  { id: 'deposit', e: '💵', n: 'Zálohy' },
+  { id: 'wedding', e: '💍', n: 'Svatba' },
   { id: 'other', e: '📦', n: 'Ostatní' },
 ];
 
 // Rozpoznání kategorie z názvu výdaje. Běží přímo v zařízení, nic se nikam neposílá.
 // Pravidla jsou začátky slov bez diakritiky; platí první kategorie, která se trefí.
 const RULES = [
+  // Záloha a svatba mají přednost: „Záloha svatba Novákovi“ je záloha, „Svatba cash“ je svatba.
+  ['deposit', 'zaloh|zalohov|deposit|kauc|rezervacni popl'],
+  ['wedding', 'svatb|svateb|wedding|nevest|zenich|novomanzel|obrad\\b'],
   ['coffee', 'kav|kafe|kafi|kafc|coffee|espress|latte|cappuc|costa|tchibo|starbucks|nespresso|mot mot|kyselac'],
   ['health', 'lekarn|leky|lek\\b|vitamin|elektrolyt|electrolyt|doktor|zubar|vilgain|protein'],
-  ['gifts', 'dar\\b|darek|dark[yu]|darec|narozenin|svatb|kytk|kvetin|vanoc'],
+  ['gifts', 'dar\\b|darek|dark[yu]|darec|narozenin|kytk|kvetin|vanoc'],
   ['internet', 'internet'],
   ['bills', 'energi|elektrin|elektrik|plyn\\b|vodne|najem|najm|doplatek|poplat|pojist|netflix|spotify|predplat|tarif'],
   ['sport', 'padel|tenis|fotbal|squash|badminton|bowling|posilovn|fitko|fitness|lyz|skipas|plavan|bazen|golf'],
@@ -42,11 +47,27 @@ export function guessCategory(text) {
   for (const [id, re] of RULES) if (re.test(t)) return id;
   return 'other';
 }
+// „Učení“ z historie skupiny: když název začíná stejným slovem jako některý dřívější záznam,
+// vezme se kategorie, kterou měl ten nejnovější (včetně ručně vybrané). Nic se nikam neposílá.
+const firstWord = (text) => String(text || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().split(/[^a-z0-9]+/)[0] || '';
+export function learnedCategory(entries, text) {
+  const w = firstWord(text);
+  if (w.length < 3) return '';
+  let best = null;
+  for (const e of entries) {
+    if (e.kind === 'transfer' || firstWord(e.title) !== w) continue;
+    if (!best || (e.c || e.u || 0) > (best.c || best.u || 0)) best = e;
+  }
+  const c = best ? catOf(best) : '';
+  return c && c !== 'other' ? c : '';
+}
 // Kategorie záznamu; kde chybí, odhadne se z názvu (platí i pro starší a importované výdaje).
 export function catOf(e) {
   if (!e.category || e.category === 'other') return guessCategory(e.title);
   // Starší importy řadily kávu pod „Pití“; kde název jasně mluví o kávě, opravíme to.
   if (e.category === 'drinks' && guessCategory(e.title) === 'coffee') return 'coffee';
+  // Než vznikly kategorie Zálohy a Svatba, padaly tyhle záznamy do Dárků; podle názvu je přeřadíme.
+  if (e.category === 'gifts' && ['deposit', 'wedding'].includes(guessCategory(e.title))) return guessCategory(e.title);
   return e.category;
 }
 export const cat = (id) => CATS.find((c) => c.id === id) || CATS[CATS.length - 1];

@@ -1,6 +1,6 @@
 import { html, render, useState, useEffect, useLayoutEffect, useMemo, useRef } from './vendor/preact-htm.js';
 import {
-  CATS, cat, catOf, guessCategory, CURRENCIES, uid, today, fmt, parseAmount, allocate, baseAmount, shares,
+  CATS, cat, catOf, guessCategory, learnedCategory, CURRENCIES, uid, today, fmt, parseAmount, allocate, baseAmount, shares,
   balances, settle, stats, debtMove, vocative, toIban, spayd, dateLabel, seed, nextDue, runRecurring,
 } from './logic.js';
 import {
@@ -350,7 +350,7 @@ function DialogHost() {
         <p>${d.message}</p>
         <div class="dialog-actions">
           ${!d.info && html`<button class="btn" onClick=${() => done(false)}>Zrušit</button>`}
-          <button class="btn primary" onClick=${() => done(true)}>${d.info ? 'Rozumím' : d.ok || 'Potvrdit'}</button>
+          <button class="btn primary" onClick=${() => done(true)}>${d.info ? 'Rozumím' : d.ok || 'Potvrdit'}${!d.info && hx()}</button>
         </div>
       </div>
     </div>
@@ -1144,7 +1144,7 @@ function Debts({ group, bal, onPay, onQr, onMove }) {
                   <span class="pay-who end"><span>${nameOf(group, p.to)}</span><${Avatar} m=${group.members.find((m) => m.id === p.to)} size=${40} /></span>
                 </div>
                 <div class="pay-actions">
-                  <button class="btn small primary" onClick=${() => onPay({ ...p, iban })}>Vyrovnat${hx()}</button>
+                  <button class="btn small primary" onClick=${() => onPay({ ...p, iban })}>Vyrovnat</button>
                 </div>
                 ${onMove && html`<button class="link-btn pay-move" onClick=${() => onMove(p)}>Převést dluh do jiné skupiny</button>`}
               </div>
@@ -1307,7 +1307,8 @@ function EntryForm({ group, entry, repeat, onSave, onDelete }) {
           <input placeholder="např. Večeře" maxlength="120" value=${title} onInput=${(e) => {
             setTitle(e.target.value);
             // Kategorie se nastaví sama podle názvu, dokud ji uživatel nevybere ručně.
-            const g = guessCategory(e.target.value);
+            // Nejdřív se zkusí, kam podobný záznam zařadila tahle skupina dřív; teprve pak obecná klíčová slova.
+            const g = learnedCategory(group.entries, e.target.value) || guessCategory(e.target.value);
             if (!catTouched && g !== 'other') setCategory(g);
           }} />
         </label>
@@ -1479,7 +1480,7 @@ function GroupForm({ group, profile, userId, admin, deleteLabel, onSave, onDelet
       ${group && userId && onWho && html`
         <button type="button" class="btn link wide" onClick=${onWho}>Jsem ve skupině někdo jiný · změnit, kdo jsem</button>`}
 
-      <button class="btn primary wide" disabled=${!!error}>${error || (group ? 'Uložit' : 'Vytvořit skupinu')}</button>
+      <button class="btn primary wide" disabled=${!!error}>${error || (group ? 'Uložit' : 'Vytvořit skupinu')}${hx()}</button>
       ${group && onRec && html`<button type="button" class="btn wide" onClick=${onRec}>🔁 Pravidelné výdaje${group.rec?.length ? ` (${group.rec.length})` : ''}</button>`}
       ${group && html`<button type="button" class="btn wide" onClick=${onBackups}>Zálohy a export</button>`}
       ${group && html`<button type="button" class="btn danger wide" onClick=${onDelete}>${deleteLabel}</button>`}
@@ -1573,7 +1574,7 @@ function PaySheet({ group, pay, onSave }) {
   const row = (label, value, key, text = value) => html`
     <div class="copy-row">
       <span><small>${label}</small><strong>${value}</strong></span>
-      <button class="btn small" onClick=${() => copy(key, text)}>${copied === key ? 'Zkopírováno ✓' : 'Kopírovat'}</button>
+      <button class="btn small" onClick=${() => copy(key, text)}>${copied === key ? 'Zkopírováno ✓' : 'Kopírovat'}${hx()}</button>
     </div>`;
   return html`
     <div class="form pay-sheet">
@@ -2258,15 +2259,18 @@ function Tour({ canGroup, demo, onDone }) {
         </section>
       </div>
       <div class="tour-nav">
-        <button class="btn small" disabled=${i === 0} onClick=${() => go(i - 1)} aria-label="Zpět">‹${hx()}</button>
+        <button class="btn small" disabled=${i === 0} onClick=${() => go(i - 1)} aria-label="Zpět">‹</button>
         <div class="tour-dots" aria-hidden="true">${Array.from({ length: N }, (_, n) => html`<i class=${n === i ? 'on' : ''} onClick=${() => go(n)}></i>`)}</div>
-        <button class="btn small primary" disabled=${last} onClick=${() => go(i + 1)} aria-label="Další">›${hx()}</button>
+        <button class="btn small primary" disabled=${last} onClick=${() => go(i + 1)} aria-label="Další">›</button>
       </div>
     </div>`;
 }
 
 // Okno „Co je nového“: na každém zařízení se ukáže jednou. Při další velké novince stačí změnit označení verze.
 const NEWS_KEY = 'vyrovnano.news';
+// Pravidlo: označení verze se NEMĚNÍ při každé drobnosti. Mění se nejvýš jednou měsíčně, a jen když se od minula
+// nasbíralo aspoň pět novinek, které uživatel uvidí. Do té doby je sem jen připisujeme:
+// Od posledního okna přibylo: návod pro nováčky, haptická odezva, kategorie Zálohy a Svatba.
 const NEWS_VERSION = '2026-11-automatizace';
 function NewsSheet({ onSettings, onDone }) {
   return html`
@@ -2314,7 +2318,7 @@ function PushAsk({ onDone }) {
       </ul>
       <p class="hint">Chodí jen to, co se týká tebe. Kdykoli je vypneš nebo upravíš v Účet → Notifikace.</p>
       ${msg && html`<p class="notice" role="status">${msg}</p>`}
-      <button class="btn primary wide" disabled=${busy} onClick=${on}>${busy ? 'Moment…' : 'Zapnout notifikace'}</button>
+      <button class="btn primary wide" disabled=${busy} onClick=${on}>${busy ? 'Moment…' : 'Zapnout notifikace'}${hx()}</button>
       <button class="btn link wide" onClick=${onDone}>Teď ne</button>
     </div>`;
 }
@@ -2362,7 +2366,7 @@ function PushSettings({ focus }) {
           <div class="row">
             <span class="grow">${state === 'on' ? 'Na tomto zařízení zapnuté' : state === 'denied' ? 'Zakázané v nastavení zařízení' : 'Na tomto zařízení vypnuté'}</span>
             <button class=${'btn small' + (state === 'on' ? '' : ' primary')} disabled=${busy || state === 'loading' || state === 'denied'} onClick=${toggle}>
-              ${busy ? 'Moment…' : state === 'on' ? 'Vypnout' : 'Zapnout'}
+              ${busy ? 'Moment…' : state === 'on' ? 'Vypnout' : 'Zapnout'}${hx()}
             </button>
           </div>
           <p class="hint">${msg || 'Dostaneš zprávu, když někdo ve tvé skupině přidá, upraví nebo smaže výdaj, uhradí dluh nebo se připojí. Vlastní změny ti nechodí. Jednou měsíčně ti navíc přijde přehled, komu dlužíš a kdo dluží tobě.'}</p>
@@ -3214,13 +3218,13 @@ function App({ user, recovery }) {
       </div>
 
 <nav class="tabbar" aria-label="Hlavní nabídka">
-        <button class=${!group && !sheet ? 'on' : ''} onClick=${() => { setSheet(null); setGid(null); }}><${Icon} name="home" /><span>Skupiny</span>${hx()}</button>
-        <button class=${sheet?.type === 'search' ? 'on' : ''} onClick=${() => setSheet({ type: 'search', all: !group })}><${Icon} name="search" /><span>Hledat</span>${hx()}</button>
+        <button class=${!group && !sheet ? 'on' : ''} onClick=${() => { setSheet(null); setGid(null); }}><${Icon} name="home" /><span>Skupiny</span></button>
+        <button class=${sheet?.type === 'search' ? 'on' : ''} onClick=${() => setSheet({ type: 'search', all: !group })}><${Icon} name="search" /><span>Hledat</span></button>
         <button class="add" aria-label=${group ? 'Přidat záznam' : 'Nová skupina'} onClick=${() => setSheet(group ? { type: 'entry' } : { type: 'group' })}>
           <span class="plus"><${Icon} name="plus" size=${26} /></span><span>${group ? 'Záznam' : 'Skupina'}</span>${hx()}
         </button>
-        <button class=${sheet?.type === 'alldebts' ? 'on' : ''} onClick=${() => setSheet({ type: 'alldebts' })}><${Icon} name="swap" /><span>Dluhy</span>${hx()}</button>
-        <button class=${sheet?.type === 'profile' ? 'on' : ''} onClick=${() => setSheet({ type: 'profile' })}><${Icon} name="user" /><span>Účet</span>${hx()}</button>
+        <button class=${sheet?.type === 'alldebts' ? 'on' : ''} onClick=${() => setSheet({ type: 'alldebts' })}><${Icon} name="swap" /><span>Dluhy</span></button>
+        <button class=${sheet?.type === 'profile' ? 'on' : ''} onClick=${() => setSheet({ type: 'profile' })}><${Icon} name="user" /><span>Účet</span></button>
       </nav>
 
       ${sheet?.type === 'group' && html`
