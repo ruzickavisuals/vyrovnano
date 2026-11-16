@@ -810,3 +810,16 @@ body.intro-go .tabbar { transition: translate 0.75s var(--ease) 0.25s; }
 
 .stamp { text-align: center; }
 .stamp strong { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
+
+/* Okno „Vyrovnat dluh“ */
+.pay-head { margin: 0; text-align: center; }
+.pay-cur { align-self: center; font-weight: 700; color: var(--muted); }
+.pay-rest { margin: 0; }
+.pay-rest.ok { color: var(--pos); font-weight: 600; }
+.pay-sheet .qr img { width: min(240px, 70%); }
+.copy-list { display: flex; flex-direction: column; gap: 10px; }
+.copy-row { display: flex; align-items: center; gap: 10px; }
+.copy-row > span { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.copy-row small { color: var(--muted); font-size: 12px; }
+.copy-row strong { overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+.hint.center { text-align: center; }

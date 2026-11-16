@@ -810,7 +810,7 @@ function EntryRow({ group, e, onEntry, onDelete, showDate }) {
         <span class="avatar sm">${e.mv ? '🔀' : '💱'}</span>
         <span class="grow">
           <strong>${moved ? `${nameOf(group, to)} dluží ${nameOf(group, e.paidBy)}` : `${nameOf(group, e.paidBy)} → ${nameOf(group, to)}`}</strong>
-          <small>${paid ? html`<span class="paid-tag">uhrazeno</span>` : html`<span class="muted">${e.title}</span>`}${when}</small>
+          <small>${paid ? html`<span class="paid-tag">${/^Uhrazeno \S/.test(e.title) ? e.title.toLowerCase() : 'uhrazeno'}</span>` : html`<span class="muted">${e.title}</span>`}${when}</small>
         </span>
         <span class="right">
           <strong>${fmt(e.amount, e.currency)}</strong>
@@ -1047,8 +1047,7 @@ function Debts({ group, bal, onPay, onQr, onMove }) {
                   <span class="pay-who end"><span>${nameOf(group, p.to)}</span><${Avatar} m=${group.members.find((m) => m.id === p.to)} size=${40} /></span>
                 </div>
                 <div class="pay-actions">
-                  <button class="btn small" onClick=${() => onQr({ ...p, iban })}>QR platba</button>
-                  <button class="btn small due" onClick=${() => onPay(p)}>Uhradit</button>
+                  <button class="btn small primary" onClick=${() => onPay({ ...p, iban })}>Vyrovnat</button>
                 </div>
                 ${onMove && html`<button class="link-btn pay-move" onClick=${() => onMove(p)}>Převést dluh do jiné skupiny</button>`}
               </div>
@@ -1056,7 +1055,8 @@ function Debts({ group, bal, onPay, onQr, onMove }) {
           })}
         </div>
         <p class="hint">Dluhy jsou přepočítané tak, aby se celá skupina vyrovnala co nejmenším počtem plateb (teď ${plan.length}).
-          Až peníze pošleš, klepni na „Uhradit“: platba se zapíše do historie a dluh ze seznamu zmizí.</p>
+          Klepni na „Vyrovnat“: zvolíš částku (klidně jen část dluhu) a způsob – QR platbou, převodem na účet nebo hotově.
+          Platba se zapíše do historie a dluh se o ni sníží.</p>
       `}
     <h3 class="day">Zůstatky</h3>
     <div class="card pad">
@@ -1388,14 +1388,94 @@ function Qr({ text, alt }) {
     : html`<p class="muted">${err ? 'QR kód se nepodařilo vytvořit (jsi offline?).' : 'Vytvářím QR kód…'}</p>`;
 }
 
-function QrSheet({ group, pay, onPaid }) {
+// Číslo účtu v českém tvaru (předčíslí-číslo/kód banky) z IBANu; u zahraničních účtů vrací null.
+function czAccount(iban) {
+  if (!/^CZ\d{22}$/.test(iban || '')) return null;
+  const prefix = iban.slice(8, 14).replace(/^0+/, '');
+  return `${prefix ? prefix + '-' : ''}${iban.slice(14).replace(/^0+/, '')}/${iban.slice(4, 8)}`;
+}
+const PAY_VIA = { qr: 'QR platbou', bank: 'převodem', cash: 'hotově' };
+
+// Vyrovnání dluhu: kolik (celý dluh, část, i víc) a jak (QR platba, převod na účet, hotově).
+// Aplikace peníze neposílá; tady se platba připraví a zapíše.
+function PaySheet({ group, pay, onSave }) {
+  const cur = group.currency;
+  const from = nameOf(group, pay.from), to = nameOf(group, pay.to);
+  const asText = (c) => String(c / 100).replace('.', ',');
+  const [str, setStr] = useState(asText(pay.amount));
+  const [via, setVia] = useState(pay.iban ? 'qr' : 'cash');
+  const [date, setDate] = useState(today());
+  const [copied, setCopied] = useState('');
+  const amount = parseAmount(str);
+  const rest = pay.amount - amount;
+  const half = Math.round(pay.amount / 200) * 100;
+  // QR kód překreslíme až chvilku po dopsání částky, ať při psaní neproblikává.
+  const [qrAmount, setQrAmount] = useState(amount);
+  useEffect(() => {
+    const t = setTimeout(() => setQrAmount(amount), 350);
+    return () => clearTimeout(t);
+  }, [amount]);
+  const copy = async (what, text) => {
+    try { await navigator.clipboard.writeText(text); setCopied(what); } catch {}
+  };
+  const account = czAccount(pay.iban);
+  const noIban = html`<p class="notice">${to} nemá v téhle skupině vyplněné číslo účtu, takže ho tu nemůžu nabídnout.
+    Číslo účtu si každý doplní sám v nastavení skupiny. Zaplatit můžeš i tak (třeba hotově) a platbu tady zapsat.</p>`;
+  const row = (label, value, key, text = value) => html`
+    <div class="copy-row">
+      <span><small>${label}</small><strong>${value}</strong></span>
+      <button class="btn small" onClick=${() => copy(key, text)}>${copied === key ? 'Zkopírováno ✓' : 'Kopírovat'}</button>
+    </div>`;
   return html`
-    <div class="qr">
-      <p><strong>${nameOf(group, pay.from)}</strong> platí <strong>${nameOf(group, pay.to)}</strong></p>
-      <div class="qr-amount">${fmt(pay.amount, group.currency)}</div>
-      <${Qr} alt="QR platba" text=${spayd(pay.iban, pay.amount, group.currency, `${group.name} - ${nameOf(group, pay.from)}`)} />
-      <p class="hint">Naskenuj v bankovní aplikaci; částka i účet se vyplní samy. Účet: ${pay.iban}</p>
-      <button class="btn done wide" onClick=${onPaid}>Uhrazeno, zapsat platbu</button>
+    <div class="form pay-sheet">
+      <p class="pay-head"><strong>${from}</strong> platí <strong>${to}</strong> · dluh ${fmt(pay.amount, cur)}</p>
+      <label class="field">
+        <span>Kolik se teď platí</span>
+        <div class="amount-row">
+          <input class="amount" inputmode="decimal" placeholder="0" value=${str} onInput=${(e) => setStr(e.target.value)} aria-label="Částka" />
+          <span class="pay-cur">${cur}</span>
+        </div>
+      </label>
+      <div class="chips">
+        <button class=${'chip' + (rest === 0 ? ' on' : '')} onClick=${() => setStr(asText(pay.amount))}>Celý dluh</button>
+        ${half > 0 && half < pay.amount && html`
+          <button class=${'chip' + (amount === half ? ' on' : '')} onClick=${() => setStr(asText(half))}>Polovina · ${fmt(half, cur)}</button>`}
+      </div>
+      <p class=${'hint pay-rest' + (amount && rest === 0 ? ' ok' : '')} role="status">
+        ${!amount ? 'Zadej částku.'
+          : rest > 0 ? html`Je to část dluhu. Po zapsání zbude doplatit <strong>${fmt(rest, cur)}</strong>.`
+          : rest === 0 ? 'Tím bude tenhle dluh celý vyrovnaný.'
+          : html`Je to o <strong>${fmt(-rest, cur)}</strong> víc, než kolik je dluh. Přeplatek se neztratí: ${to} ho bude ve skupině dlužit zpět.`}
+      </p>
+
+      <div class="field"><span>Jak</span></div>
+      <div class="seg" role="tablist">
+        <button class=${via === 'qr' ? 'on' : ''} onClick=${() => setVia('qr')}>QR platba</button>
+        <button class=${via === 'bank' ? 'on' : ''} onClick=${() => setVia('bank')}>Převod</button>
+        <button class=${via === 'cash' ? 'on' : ''} onClick=${() => setVia('cash')}>Hotově</button>
+      </div>
+      ${via === 'qr' && (!pay.iban ? noIban : !qrAmount ? html`<p class="hint">QR kód se ukáže po zadání částky.</p>` : html`
+        <div class="qr">
+          <${Qr} alt="QR platba" text=${spayd(pay.iban, qrAmount, cur, `${group.name} - ${from}`)} />
+          <p class="hint">Naskenuj v bankovní aplikaci; účet i částka ${fmt(qrAmount, cur)} se vyplní samy. Po zaplacení platbu dole zapiš.</p>
+        </div>`)}
+      ${via === 'bank' && (!pay.iban ? noIban : html`
+        <div class="card pad copy-list">
+          ${account && row('Číslo účtu', account, 'acc')}
+          ${row('IBAN', pay.iban, 'iban')}
+          ${amount > 0 && row('Částka', fmt(amount, cur), 'amt', (amount / 100).toFixed(2).replace('.', ','))}
+        </div>
+        <p class="hint">Pošli peníze ze své banky jakkoli a pak platbu dole zapiš.</p>`)}
+      ${via === 'cash' && html`<p class="hint">Peníze si předejte osobně a platbu dole zapište, ať o ní ví celá skupina.</p>`}
+
+      <label class="field">
+        <span>Kdy</span>
+        <${DateField} value=${date} onChange=${setDate} />
+      </label>
+      <button class="btn done wide" disabled=${!amount} onClick=${() => onSave({ amount, via, date })}>
+        ${amount ? `Zapsat platbu ${fmt(amount, cur)}` : 'Zapsat platbu'}
+      </button>
+      <p class="hint center">Aplikace sama peníze neposílá. Zapsáním se platba uloží do historie a dluh se všem ve skupině sníží.</p>
     </div>
   `;
 }
@@ -2501,14 +2581,20 @@ function App({ user, recovery }) {
     announce(group, `smazán záznam „${e.title || 'Převod'}“ (${fmt(e.amount, e.currency)})`, 'deleted', [e.paidBy, ...Object.keys(e.parts)]);
     putGroup(drop(logged(group, 'del', gone), id));
   }
-  async function payDebt(p) {
-    const msg = `Označit dluh jako uhrazený? ${nameOf(group, p.from)} → ${nameOf(group, p.to)}, ${fmt(p.amount, group.currency)}. Peníze tím nikam neodejdou, jen se platba zapíše do historie a dluh zmizí všem členům.`;
-    if (!(await ask(msg, { ok: 'Uhrazeno' }))) return;
-    celebrate();
+  // Zápis platby z okna „Vyrovnat“: celý dluh, jeho část i přeplatek; způsob úhrady se uloží do názvu.
+  function payDebt(p, { amount, via, date }) {
+    if (!amount) return;
+    const cur = group.currency;
+    const who = `${nameOf(group, p.from)} → ${nameOf(group, p.to)}`;
+    const how = PAY_VIA[via] || PAY_VIA.cash;
+    const note = amount < p.amount ? `uhrazena část dluhu: ${fmt(amount, cur)} z ${fmt(p.amount, cur)} (${who}), ${how}`
+      : amount > p.amount ? `uhrazeno ${fmt(amount, cur)} (${who}), ${how}; o ${fmt(amount - p.amount, cur)} víc, než byl dluh`
+      : `uhrazeno ${fmt(amount, cur)} (${who}), ${how}`;
+    if (amount >= p.amount) celebrate();
     saveEntry({
-      id: uid(), kind: 'transfer', title: 'Převod', amount: p.amount, currency: group.currency, rate: 1,
-      paidBy: p.from, mode: 'equal', parts: { [p.to]: 1 }, category: 'other', date: today(),
-    }, `uhrazeno ${fmt(p.amount, group.currency)} (${nameOf(group, p.from)} → ${nameOf(group, p.to)})`);
+      id: uid(), kind: 'transfer', title: `Uhrazeno ${how}`, amount, currency: cur, rate: 1,
+      paidBy: p.from, mode: 'equal', parts: { [p.to]: 1 }, category: 'other', date: /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : today(),
+    }, note);
   }
   // Převod dluhu: tady vznikne převod, který dluh vyrovná, a v cílové skupině opačný převod,
   // který tam stejný dluh založí. Do statistik útraty se ani jeden nepočítá.
@@ -2529,13 +2615,6 @@ function App({ user, recovery }) {
       : g)));
     close();
   }
-  function openQr(pay) {
-    if (!pay.iban) {
-      return notify(`${nameOf(group, pay.to)} nemá vyplněné číslo účtu, takže QR platbu nejde vytvořit. Číslo účtu si každý doplní sám v nastavení skupiny (ikona ozubeného kola).`);
-    }
-    setSheet({ type: 'qr', pay });
-  }
-
   const needsWho = group && !group.members.some((m) => m.id === group.me);
   // Propojení mého účtu s členem skupiny. Slouží i k opravě, když se někdo spároval špatně:
   // dosavadní „já“ se odpojí, a pokud je prázdné (vzniklo omylem, nemá žádný záznam), rovnou zmizí.
@@ -2720,9 +2799,8 @@ function App({ user, recovery }) {
             onDelete=${(entry) => deleteEntry(entry.id)}
             onAll=${() => { allKeep.current = null; setSheet({ type: 'entries' }); }}
             onLog=${() => setSheet({ type: 'log' })}
-            onQr=${openQr}
             onMove=${groups.length > 1 ? (pay) => setSheet({ type: 'move', pay }) : null}
-            onPay=${payDebt} />`
+            onPay=${(pay) => setSheet({ type: 'pay', pay })} />`
             : html`<${Welcome} groups=${groups} name=${prof.name} />`}
         </section>
       </div>
@@ -2774,9 +2852,9 @@ function App({ user, recovery }) {
         <${Sheet} title="Převést dluh" onClose=${close}>
           <${MoveSheet} group=${group} groups=${groups} pay=${sheet.pay} onMove=${(g, f, t) => moveDebt(sheet.pay, g, f, t)} />
         <//>`}
-      ${sheet?.type === 'qr' && group && html`
-        <${Sheet} title="QR platba" onClose=${close}>
-          <${QrSheet} group=${group} pay=${sheet.pay} onPaid=${() => payDebt(sheet.pay)} />
+      ${sheet?.type === 'pay' && group && html`
+        <${Sheet} title="Vyrovnat dluh" onClose=${close}>
+          <${PaySheet} group=${group} pay=${sheet.pay} onSave=${(x) => payDebt(sheet.pay, x)} />
         <//>`}
       ${sheet?.type === 'share' && group && html`
         <${Sheet} title="Sdílení skupiny" onClose=${close}>
