@@ -15,17 +15,18 @@ export const CATS = [
   { id: 'fun', e: '🎉', n: 'Zábava' },
   { id: 'gifts', e: '🎁', n: 'Dárky' },
   { id: 'health', e: '💊', n: 'Zdraví' },
-  { id: 'deposit', e: '💵', n: 'Zálohy' },
-  { id: 'wedding', e: '💍', n: 'Svatba' },
+  { id: 'deposit', e: '💰', n: 'Zálohy' },
+  { id: 'wedding', e: '💍', n: 'Svatba cash' },
   { id: 'other', e: '📦', n: 'Ostatní' },
 ];
 
 // Rozpoznání kategorie z názvu výdaje. Běží přímo v zařízení, nic se nikam neposílá.
 // Pravidla jsou začátky slov bez diakritiky; platí první kategorie, která se trefí.
 const RULES = [
-  // Záloha a svatba mají přednost: „Záloha svatba Novákovi“ je záloha, „Svatba cash“ je svatba.
-  ['deposit', 'zaloh|zalohov|deposit|kauc|rezervacni popl'],
-  ['wedding', 'svatb|svateb|wedding|nevest|zenich|novomanzel|obrad\\b'],
+  // Záloha má přednost před vším. „Svatba cash“ se pozná jen podle začátku názvu („Svatba – Novákovi“, „Cash – …“),
+  // aby třeba „Benzin svatba“ zůstal v dopravě.
+  ['deposit', 'zaloh|deposit|kauc'],
+  ['wedding', '^svatb|^cash\\b|^wedding'],
   ['coffee', 'kav|kafe|kafi|kafc|coffee|espress|latte|cappuc|costa|tchibo|starbucks|nespresso|mot mot|kyselac'],
   ['health', 'lekarn|leky|lek\\b|vitamin|elektrolyt|electrolyt|doktor|zubar|vilgain|protein'],
   ['gifts', 'dar\\b|darek|dark[yu]|darec|narozenin|kytk|kvetin|vanoc'],
@@ -70,7 +71,41 @@ export function catOf(e) {
   if (e.category === 'gifts' && ['deposit', 'wedding'].includes(guessCategory(e.title))) return guessCategory(e.title);
   return e.category;
 }
-export const cat = (id) => CATS.find((c) => c.id === id) || CATS[CATS.length - 1];
+// Vlastní kategorie skupin: { id, e (ikona), n (název), k (klíčová slova) }. Aby je šlo dohledat odkudkoli jen podle id,
+// drží se v jednom seznamu, který aplikace obnoví při každé změně skupin.
+const custom = new Map();
+export function registerCats(groups) {
+  custom.clear();
+  for (const g of groups) for (const c of g.cats || []) custom.set(c.id, c);
+}
+export const cat = (id) => custom.get(id) || CATS.find((c) => c.id === id) || CATS[CATS.length - 1];
+const fold = (text) => String(text || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+// Kategorie podle klíčových slov skupiny: slovo musí v názvu začínat (stačí začátek slova, takže „balíček“ najde i „balíčky“);
+// krátká slova do tří písmen (třeba „FA“) musí sedět celá. „^slovo“ = jen na začátku názvu.
+export function customCategory(group, text) {
+  const t = fold(text);
+  if (!t) return '';
+  for (const c of group?.cats || []) {
+    for (const raw of c.k || []) {
+      const k = fold(raw);
+      if (!k) continue;
+      if (k[0] === '^' ? t.startsWith(k.slice(1)) : new RegExp('(?:^|[^a-z0-9])' + k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + (k.length <= 3 ? '(?![a-z0-9])' : '')).test(t)) return c.id;
+    }
+  }
+  return '';
+}
+// Zpětné zařazení: záznamy, jejichž název odpovídá klíčovým slovům vlastní kategorie, do ní přesune.
+export function applyCats(group, now = Date.now()) {
+  let n = 0;
+  const entries = group.entries.map((e) => {
+    if (e.kind === 'transfer') return e;
+    const c = customCategory(group, e.title);
+    if (!c || e.category === c) return e;
+    n++;
+    return { ...e, category: c, u: now };
+  });
+  return n ? { ...group, entries, moved: n } : group;
+}
 
 export const CURRENCIES = ['CZK', 'EUR', 'USD', 'GBP', 'PLN', 'HUF', 'CHF'];
 

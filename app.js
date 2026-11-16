@@ -1,6 +1,6 @@
 import { html, render, useState, useEffect, useLayoutEffect, useMemo, useRef } from './vendor/preact-htm.js';
 import {
-  CATS, cat, catOf, guessCategory, learnedCategory, CURRENCIES, uid, today, fmt, parseAmount, allocate, baseAmount, shares,
+  CATS, cat, catOf, guessCategory, learnedCategory, registerCats, customCategory, applyCats, CURRENCIES, uid, today, fmt, parseAmount, allocate, baseAmount, shares,
   balances, settle, stats, debtMove, vocative, toIban, spayd, dateLabel, seed, nextDue, runRecurring,
 } from './logic.js';
 import {
@@ -922,7 +922,7 @@ function EntryRow({ group, e, onEntry, onDelete, showDate }) {
   return html`
     <${SwipeRow} onDelete=${() => onDelete(e)} onEdit=${() => onEntry(e)}>
     <button class="item" onClick=${() => onEntry(e)}>
-      <span class="avatar sm">${inc ? '💰' : cat(catOf(e)).e}</span>
+      <span class="avatar sm">${inc && catOf(e) === 'other' ? '💰' : cat(catOf(e)).e}</span>
       <span class="grow">
         <strong>${e.title}</strong>
         <small class="muted">${inc ? 'příjem · přijal(a)' : 'platil(a)'} ${nameOf(group, e.paidBy)}${e.currency !== cur ? ` · ${fmt(e.amount, e.currency)}` : ''}${when}</small>
@@ -1308,12 +1308,12 @@ function EntryForm({ group, entry, repeat, onSave, onDelete }) {
             setTitle(e.target.value);
             // Kategorie se nastaví sama podle názvu, dokud ji uživatel nevybere ručně.
             // Nejdřív se zkusí, kam podobný záznam zařadila tahle skupina dřív; teprve pak obecná klíčová slova.
-            const g = learnedCategory(group.entries, e.target.value) || guessCategory(e.target.value);
+            const g = customCategory(group, e.target.value) || learnedCategory(group.entries, e.target.value) || guessCategory(e.target.value);
             if (!catTouched && g !== 'other') setCategory(g);
           }} />
         </label>
         <div class="chips">
-          ${CATS.map((c) => html`
+          ${[...(group.cats || []), ...CATS].map((c) => html`
             <button type="button" class=${'chip' + (c.id === category ? ' on' : '')} onClick=${() => { setCategory(c.id); setCatTouched(true); }}><span>${c.e}</span><span>${c.n}</span></button>
           `)}
         </div>
@@ -1387,6 +1387,9 @@ function EntryForm({ group, entry, repeat, onSave, onDelete }) {
 
 function GroupForm({ group, profile, userId, admin, deleteLabel, onSave, onDelete, onBackups, onWho, onRec }) {
   const [ends, setEnds] = useState(group?.ends || '');
+  // Vlastní kategorie: klíčová slova se píšou jako text oddělený čárkami.
+  const [cats, setCats] = useState(() => (group?.cats || []).map((c) => ({ ...c, ks: (c.k || []).join(', ') })));
+  const updCat = (id, patch) => setCats((cs) => cs.map((c) => (c.id === id ? { ...c, ...patch } : c)));
   const [name, setName] = useState(group?.name || '');
   const [emoji, setEmoji] = useState(group?.emoji || '👥');
   const [color, setColor] = useState(group?.color || 'teal');
@@ -1409,6 +1412,8 @@ function GroupForm({ group, profile, userId, admin, deleteLabel, onSave, onDelet
       ...(group || {}), id: group?.id || uid(), entries: group?.entries || [],
       name: name.trim(), emoji, color, currency, members: ms, me: ms.some((m) => m.id === me) ? me : ms[0].id,
       ends: ends || undefined,
+      cats: cats.filter((c) => c.n.trim()).map((c) => ({ id: c.id, e: (c.e || '').trim() || '🏷️', n: c.n.trim().slice(0, 30),
+        k: c.ks.split(',').map((x) => x.trim()).filter(Boolean).slice(0, 20) })),
     });
   }
 
@@ -1446,6 +1451,25 @@ function GroupForm({ group, profile, userId, admin, deleteLabel, onSave, onDelet
         ${ends && html`<${DateField} value=${ends} onChange=${setEnds} />`}
         <small class="muted">${ends ? 'Den po konci přijde všem členům notifikace s vyúčtováním: kdo komu kolik dluží.' : 'Hodí se pro jednorázové akce. U běžné domácnosti nech vypnuté.'}</small>
       </div>
+
+      ${group && html`
+        <div class="field">
+          <span>Vlastní kategorie</span>
+          ${cats.length > 0 && html`
+            <div class="card list">
+              ${cats.map((c) => html`
+                <div class="member" key=${c.id}>
+                  <div class="row">
+                    <input class="cat-emoji" maxlength="8" aria-label="Ikona" value=${c.e} onInput=${(e) => updCat(c.id, { e: e.target.value })} />
+                    <input class="grow" placeholder="Název, např. Tisk fotek" maxlength="30" value=${c.n} onInput=${(e) => updCat(c.id, { n: e.target.value })} />
+                    <button type="button" class="icon-btn" title="Odebrat kategorii" onClick=${() => setCats((cs) => cs.filter((x) => x.id !== c.id))}><${Icon} name="close" size=${16} /></button>
+                  </div>
+                  <input class="iban" maxlength="300" placeholder="Klíčová slova oddělená čárkou, např. tisk, fotky" value=${c.ks} onInput=${(e) => updCat(c.id, { ks: e.target.value })} />
+                </div>`)}
+            </div>`}
+          <button type="button" class="btn wide" onClick=${() => setCats((cs) => [...cs, { id: 'k' + uid(), e: '🏷️', n: '', ks: '' }])}>+ Přidat kategorii</button>
+          <small class="muted">Záznam, jehož název obsahuje klíčové slovo, se do kategorie zařadí sám. Po uložení se podle slov přeřadí i starší záznamy.</small>
+        </div>`}
 
       <div class="field"><span>Členové</span></div>
       <div class="card list">
@@ -1848,7 +1872,7 @@ function SearchSheet({ groups, scopeName, onOpen }) {
             const sub = e.kind === 'transfer' ? e.title : `${e.kind === 'income' ? 'přijal(a)' : 'platil(a)'} ${nameOf(g, e.paidBy)}`;
             return html`
               <button class="item" onClick=${() => onOpen(g.id, e)}>
-                <span class="avatar sm">${e.kind === 'transfer' ? (e.mv ? '🔀' : '💱') : e.kind === 'income' ? '💰' : cat(catOf(e)).e}</span>
+                <span class="avatar sm">${e.kind === 'transfer' ? (e.mv ? '🔀' : '💱') : e.kind === 'income' && catOf(e) === 'other' ? '💰' : cat(catOf(e)).e}</span>
                 <span class="grow">
                   <strong><${Marked} text=${title} tokens=${tokens} /></strong>
                   <small class="muted"><${Marked} text=${`${dateLabel(e.date)} · ${sub}${many ? ` · ${g.name}` : ''}`} tokens=${tokens} /></small>
@@ -2615,6 +2639,7 @@ function App({ user, recovery }) {
   useEffect(() => { if (!leaving.current) localStorage.setItem(gkey, JSON.stringify(groups)); }, [groups]);
   useEffect(() => { if (!leaving.current) localStorage.setItem(pkey, JSON.stringify(profile)); }, [profile]);
 
+  registerCats(groups);
   const group = groups.find((g) => g.id === gid);
   // Záznam otevřený z okna „Všechny záznamy“ se po zavření vrací zpět do něj (sheet.back).
   // Samotné okno se záznamy zůstává otevřené i po smazání řádku přímo v něm.
@@ -2863,6 +2888,14 @@ function App({ user, recovery }) {
       }
       for (const m of before.members) if (!now.has(m.id)) ch.push(`odebrán člen ${m.name}`);
       if (before.emoji !== out.emoji || before.color !== out.color) ch.push('vzhled skupiny');
+      if (JSON.stringify(before.cats || []) !== JSON.stringify(out.cats || [])) {
+        const applied = applyCats(out);
+        const moved = applied.moved || 0;
+        out = { ...applied };
+        delete out.moved;
+        ch.push(`vlastní kategorie${moved ? ` (zpětně zařazeno ${plural(moved, 'záznam', 'záznamy', 'záznamů')})` : ''}`);
+      }
+      if (!out.cats?.length) delete out.cats;
       if ((before.ends || '') !== (out.ends || '')) ch.push(out.ends ? `konec akce ${dateLabel(out.ends)}` : 'zrušen konec akce');
       if (ch.length) out = logged(out, 'group', `upravena skupina: ${ch.join(', ')}`);
     }

@@ -31,7 +31,7 @@ export const shared = (g) => ({
   name: g.name, emoji: g.emoji, color: g.color, currency: g.currency, members: g.members,
   entries: g.entries, dead: g.dead || {}, mu: g.mu || 0, log: g.log || [],
   // Pravidelné výdaje a datum konce akce (jen když jsou nastavené, aby se starší skupiny zbytečně neměnily).
-  rec: g.rec?.length ? g.rec : undefined, ends: g.ends || undefined,
+  rec: g.rec?.length ? g.rec : undefined, ends: g.ends || undefined, cats: g.cats?.length ? g.cats : undefined,
 });
 
 // Stabilní textová podoba pro porovnání (databáze si pořadí klíčů přeskládá).
@@ -82,8 +82,9 @@ export function merge(a, b) {
   const same = (a.mu || 0) === (b.mu || 0);
   const rec = meta.rec?.length ? meta.rec : same ? other.rec : undefined;
   const ends = meta.ends || (same ? other.ends : undefined);
+  const cats = meta.cats?.length ? meta.cats : same ? other.cats : undefined;
   return { name: meta.name, emoji: meta.emoji, color: meta.color, currency: meta.currency, members, entries, dead, mu: meta.mu || 0,
-    log: mergeLog(a.log, b.log), rec: rec?.length ? rec : undefined, ends: ends || undefined };
+    log: mergeLog(a.log, b.log), rec: rec?.length ? rec : undefined, ends: ends || undefined, cats: cats?.length ? cats : undefined };
 }
 
 // Data ze serveru mohl upravit kterýkoli člen skupiny, proto jim nevěříme naslepo:
@@ -149,6 +150,11 @@ export function sanitize(d) {
       day: Number.isInteger(r.day) && r.day >= 1 && r.day <= 31 ? r.day : 1,
       next: r.next,
     }));
+  // Vlastní kategorie skupiny s klíčovými slovy.
+  const cats = (Array.isArray(d.cats) ? d.cats : []).slice(0, 30)
+    .filter((c) => c && okId(c.id) && c.id.length <= 20 && str(c.n, 30).trim())
+    .map((c) => ({ id: c.id, e: str(c.e, 16) || '🏷️', n: str(c.n, 30).trim(),
+      k: (Array.isArray(c.k) ? c.k : []).slice(0, 20).map((x) => str(x, 40).trim()).filter(Boolean) }));
   const dead = {};
   if (d.dead && typeof d.dead === 'object') {
     for (const [k, v] of Object.entries(d.dead).slice(0, 5000)) if (okId(k) && Number.isFinite(v)) dead[k] = v;
@@ -161,7 +167,7 @@ export function sanitize(d) {
     .sort(logOrder).slice(-LOG_MAX);
   return { name: str(d.name, 80) || 'Skupina', emoji: str(d.emoji, 16) || '👥',
     color: GROUP_COLORS.includes(d.color) ? d.color : undefined, currency: cur(d.currency), members, entries, dead, mu: num(d.mu), log,
-    rec: rec.length ? rec : undefined, ends: isDate(d.ends) ? d.ends : undefined };
+    rec: rec.length ? rec : undefined, ends: isDate(d.ends) ? d.ends : undefined, cats: cats.length ? cats : undefined };
 }
 
 // Otisk sdílené části skupiny – podle něj poznáme, jestli je co synchronizovat.
