@@ -823,3 +823,10 @@ body.intro-go .tabbar { transition: translate 0.75s var(--ease) 0.25s; }
 .copy-row small { color: var(--muted); font-size: 12px; }
 .copy-row strong { overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
 .hint.center { text-align: center; }
+
+/* Nabídka notifikací při prvním spuštění */
+.push-ask { text-align: center; }
+.push-ask .big { font-size: 52px; line-height: 1; }
+.push-ask h3 { font-size: 20px; margin: 0; }
+.push-ask p { margin: 0; }
+.push-ask ul { list-style: none; margin: 0; padding: 12px 14px; text-align: left; display: flex; flex-direction: column; gap: 8px; background: var(--card); border: 1px solid var(--line); border-radius: 14px; }

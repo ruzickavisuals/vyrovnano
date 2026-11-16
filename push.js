@@ -74,7 +74,7 @@ export async function resumePush(save) {
 }
 
 // Zkušební zpráva na vlastní zařízení; vrací { sent, devices, failed? }.
-export const testPush = () => call('POST', { test: true, title: 'Zkušební notifikace', body: 'Funguje to 🎉' });
+export const testPush = () => call('POST', { test: true, title: 'Vyrovnáno', body: '🔔 Zkušební notifikace: funguje to. Takhle ti budou chodit zprávy ze skupin.' });
 
 // Pošle zprávu ostatním členům skupiny. Selhání se nehlásí – notifikace je jen doplněk.
 export const notifyGroup = (groupId, title, body, type = 'entry', involved = []) =>
