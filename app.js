@@ -327,6 +327,15 @@ function Seg({ options, value, onChange }) {
 
 let openDialog = null;
 // Potvrzovací okno ve vzhledu aplikace; vrací true/false.
+// Rozpracovaný formulář: jakmile do něj uživatel něco napíše, zavření okna (křížek, tažení zpět, klepnutí vedle,
+// Esc) se nejdřív zeptá. `touch` formulář označí, `clear` označení zruší těsně před uložením.
+let draft = false;
+function useDraft() {
+  const [t, setT] = useState(false);
+  useEffect(() => { draft = t; return () => { draft = false; }; }, [t]);
+  return [() => { if (!t) setT(true); }, () => { draft = false; }];
+}
+
 const ask = (message, opts = {}) =>
   new Promise((resolve) => (openDialog ? openDialog({ message, resolve, ...opts }) : resolve(false)));
 // Informační okno s jedním tlačítkem.
@@ -349,7 +358,7 @@ function DialogHost() {
       <div class="dialog" role="alertdialog" aria-modal="true">
         <p>${d.message}</p>
         <div class="dialog-actions">
-          ${!d.info && html`<button class="btn" onClick=${() => done(false)}>Zrušit</button>`}
+          ${!d.info && html`<button class="btn" onClick=${() => done(false)}>${d.cancel || 'Zrušit'}</button>`}
           <button class="btn primary" onClick=${() => done(true)}>${d.info ? 'Rozumím' : d.ok || 'Potvrdit'}${!d.info && hx()}</button>
         </div>
       </div>
@@ -853,7 +862,7 @@ function GroupView({ group, onBack, onEdit, onShare, onEntry, onAdd, onPay, onQr
       <div class="row">
         <button class="icon-btn back" onClick=${onBack} aria-label="Zpět"><${Icon} name="back" size=${20} /></button>
         <h1 class="grow">${group.emoji} ${group.name}</h1>
-        <button class="btn primary small only-wide add-btn" onClick=${onAdd}>+ Přidat záznam</button>
+        <button class="btn primary small only-wide add-btn" onClick=${onAdd}>+ Přidat platbu</button>
         <button class="icon-btn only-wide" onClick=${onSearch} aria-label="Hledat ve skupině" title="Hledat (klávesa /)"><${Icon} name="search" size=${18} /></button>
         <button class="icon-btn" onClick=${onShare} aria-label="Sdílet skupinu"><${Icon} name="share" size=${18} /></button>
         <button class="icon-btn" onClick=${onEdit} aria-label="Upravit skupinu"><${Icon} name="settings" size=${18} /></button>
@@ -885,7 +894,7 @@ function GroupView({ group, onBack, onEdit, onShare, onEntry, onAdd, onPay, onQr
       </section>
       </div>
     </main>
-    <button class="fab" onClick=${onAdd} aria-label="Přidat výdaj">+</button>
+    <button class="fab" onClick=${onAdd} aria-label="Přidat platbu">+</button>
   `;
 }
 
@@ -1206,6 +1215,7 @@ function Stats({ group, st }) {
 /* ---------- Formulář výdaje / převodu ---------- */
 
 function EntryForm({ group, entry, repeat, onSave, onDelete }) {
+  const [touch, clearDraft] = useDraft();
   // Opakování jde nastavit jen u nového záznamu: '' = jednorázově, jinak každý týden / měsíc.
   const [every, setEvery] = useState(repeat || '');
   // Neaktivní členy nabízíme jen u starých záznamů, ve kterých figurují.
@@ -1289,6 +1299,7 @@ function EntryForm({ group, entry, repeat, onSave, onDelete }) {
   function submit(ev) {
     ev.preventDefault();
     if (error) return;
+    clearDraft();
     const common = { id: entry?.id || uid(), amount, currency, rate, paidBy, date };
     if (kind === 'transfer') {
       onSave({ ...common, kind, title: 'Převod', mode: 'equal', category: 'other', parts: { [to]: 1 } }, every);
@@ -1299,7 +1310,7 @@ function EntryForm({ group, entry, repeat, onSave, onDelete }) {
   }
 
   return html`
-    <form onSubmit=${submit} class="form">
+    <form onSubmit=${submit} onInput=${touch} class="form">
       ${!entry && html`<${Seg} value=${kind} onChange=${setKind} options=${[['expense', 'Výdaj'], ['income', 'Příjem'], ['transfer', 'Převod']]} />`}
 
       <div class="amount-row">
@@ -1410,6 +1421,7 @@ function EntryForm({ group, entry, repeat, onSave, onDelete }) {
 /* ---------- Formulář skupiny ---------- */
 
 function GroupForm({ group, profile, userId, admin, deleteLabel, onSave, onDelete, onBackups, onWho, onRec }) {
+  const [touch, clearDraft] = useDraft();
   const [ends, setEnds] = useState(group?.ends || '');
   // Vlastní kategorie: klíčová slova se píšou jako text oddělený čárkami.
   const [cats, setCats] = useState(() => (group?.cats || []).map((c) => ({ ...c, ks: (c.k || []).join(', ') })));
@@ -1431,6 +1443,7 @@ function GroupForm({ group, profile, userId, admin, deleteLabel, onSave, onDelet
   function submit(ev) {
     ev.preventDefault();
     if (error) return;
+    clearDraft();
     const ms = members.filter((m) => m.name.trim() || used.has(m.id)).map((m) => ({ ...m, name: m.name.trim() || '?', iban: (m.iban || '').trim() }));
     onSave({
       ...(group || {}), id: group?.id || uid(), entries: group?.entries || [],
@@ -1442,7 +1455,7 @@ function GroupForm({ group, profile, userId, admin, deleteLabel, onSave, onDelet
   }
 
   return html`
-    <form onSubmit=${submit} class="form">
+    <form onSubmit=${submit} onInput=${touch} class="form">
       <label class="field">
         <span>Název</span>
         <input placeholder="např. Dovolená Chorvatsko" value=${name} onInput=${(e) => setName(e.target.value)} />
@@ -1543,7 +1556,7 @@ function RecSheet({ group, onAdd, onRemove }) {
   const list = group.rec || [];
   return html`
     <div class="form">
-      <p class="hint">Nájem, internet, Netflix… Zapíšou se samy v daný den, nikdo na ně nemusí myslet. Nový přidáš i přímo v okně „Nový záznam“ volbou Opakování.</p>
+      <p class="hint">Nájem, internet, Netflix… Zapíšou se samy v daný den, nikdo na ně nemusí myslet. Nový přidáš i přímo v okně „Nová platba“ volbou Opakování.</p>
       ${list.length === 0 && html`<p class="hint center">Zatím tu žádný pravidelný výdaj není.</p>`}
       ${list.length > 0 && html`
         <div class="card list">
@@ -2318,7 +2331,9 @@ function Tour({ canGroup, demo, onDone }) {
 const NEWS_KEY = 'vyrovnano.news';
 // Pravidlo: označení verze se NEMĚNÍ při každé drobnosti. Mění se nejvýš jednou měsíčně, a jen když se od minula
 // nasbíralo aspoň pět novinek, které uživatel uvidí. Do té doby je sem jen připisujeme:
-// Od posledního okna přibylo: návod pro nováčky, haptická odezva, kategorie Zálohy a Svatba.
+// Do okna patří jen novinky s přínosem pro uživatele, ne drobnosti (přejmenování tlačítka apod.).
+// Od posledního okna přibylo: návod pro nováčky, haptická odezva, vlastní kategorie skupin s klíčovými slovy,
+// nabídka častých názvů při zápisu, potvrzení před zahozením rozpracovaného.
 const NEWS_VERSION = '2026-11-automatizace';
 function NewsSheet({ onSettings, onDone }) {
   return html`
@@ -2667,7 +2682,11 @@ function App({ user, recovery }) {
   const group = groups.find((g) => g.id === gid);
   // Záznam otevřený z okna „Všechny záznamy“ se po zavření vrací zpět do něj (sheet.back).
   // Samotné okno se záznamy zůstává otevřené i po smazání řádku přímo v něm.
-  const close = () => setSheet((cur) => (cur?.back ? { type: cur.back } : cur?.type === 'entries' ? cur : null));
+  const close = async () => {
+    if (draft && !(await ask('Máš tu rozpracované změny. Opravdu zavřít? Co jsi napsal(a), se neuloží.', { ok: 'Zahodit', cancel: 'Pokračovat v psaní' }))) return;
+    draft = false;
+    setSheet((cur) => (cur?.back ? { type: cur.back } : cur?.type === 'entries' ? cur : null));
+  };
   const allKeep = useRef(null);
   // Dotyk: tažení od levého okraje doprava = zpět. Aktuální obrazovka (okno, nebo skupina) jede
   // s prstem a pod ní je vidět ta, na kterou se vracíš. Po puštění buď dojede pryč, nebo se vrátí.
@@ -2719,7 +2738,7 @@ function App({ user, recovery }) {
         s.under.style.opacity = go ? '1' : '0.55';
       }
       setTimeout(() => {
-        if (go) { if (s.sheet) setSheet(null); else setGid(null); }
+        if (go) { if (s.sheet) { if (draft) close(); else setSheet(null); } else setGid(null); }
         // Úklid až po překreslení, aby obrazovka neproblikla.
         requestAnimationFrame(() => {
           root.classList.remove('peek-sheet', 'peek-back');
@@ -3277,8 +3296,8 @@ function App({ user, recovery }) {
 <nav class="tabbar" aria-label="Hlavní nabídka">
         <button class=${!group && !sheet ? 'on' : ''} onClick=${() => { setSheet(null); setGid(null); }}><${Icon} name="home" /><span>Skupiny</span></button>
         <button class=${sheet?.type === 'search' ? 'on' : ''} onClick=${() => setSheet({ type: 'search', all: !group })}><${Icon} name="search" /><span>Hledat</span></button>
-        <button class="add" aria-label=${group ? 'Přidat záznam' : 'Nová skupina'} onClick=${() => setSheet(group ? { type: 'entry' } : { type: 'group' })}>
-          <span class="plus"><${Icon} name="plus" size=${26} /></span><span>${group ? 'Záznam' : 'Skupina'}</span>${hx()}
+        <button class="add" aria-label=${group ? 'Přidat platbu' : 'Nová skupina'} onClick=${() => setSheet(group ? { type: 'entry' } : { type: 'group' })}>
+          <span class="plus"><${Icon} name="plus" size=${26} /></span><span>${group ? 'Platba' : 'Skupina'}</span>${hx()}
         </button>
         <button class=${sheet?.type === 'alldebts' ? 'on' : ''} onClick=${() => setSheet({ type: 'alldebts' })}><${Icon} name="swap" /><span>Dluhy</span></button>
         <button class=${sheet?.type === 'profile' ? 'on' : ''} onClick=${() => setSheet({ type: 'profile' })}><${Icon} name="user" /><span>Účet</span></button>
@@ -3293,7 +3312,7 @@ function App({ user, recovery }) {
             onRec=${sheet.group ? () => setSheet({ type: 'rec' }) : null} />
         <//>`}
       ${sheet?.type === 'entry' && group && html`
-        <${Sheet} title=${sheet.entry?.mv ? 'Převedený dluh' : sheet.entry ? 'Upravit záznam' : 'Nový záznam'} onClose=${close}>
+        <${Sheet} title=${sheet.entry?.mv ? 'Převedený dluh' : sheet.entry ? 'Upravit platbu' : 'Nová platba'} onClose=${close}>
           ${sheet.entry?.mv
             ? html`<${MovedInfo} group=${group} entry=${sheet.entry} other=${groups.find((g) => g.id === sheet.entry.mvg)}
                 onDelete=${() => deleteEntry(sheet.entry.id)} />`
