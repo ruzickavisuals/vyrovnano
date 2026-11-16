@@ -417,8 +417,8 @@ revoke execute on function public.get_notify_prefs(), public.set_notify_prefs(js
 grant execute on function public.get_notify_prefs(), public.set_notify_prefs(jsonb) to authenticated;
 
 -- ===== Zálohy =====
--- Každou hodinu se uloží kopie každé skupiny, která se od poslední zálohy změnila.
--- Uchovává se posledních 48 verzí na skupinu; starší se mažou.
+-- Každých 15 minut se uloží kopie každé skupiny, která se od poslední zálohy změnila.
+-- Uchovává se posledních 48 verzí na skupinu a k tomu jedna verze z každého dne za posledních 30 dní.
 -- Zálohy smazaných skupin zůstávají 30 dní (obnovit je může jen správce projektu).
 create table if not exists public.group_backups (
   group_id uuid not null,
@@ -439,11 +439,14 @@ begin
     select g.id, g.version, g.data from public.groups g
     where not exists (select 1 from public.group_backups b where b.group_id = g.id and b.version = g.version);
 
+  -- Necháváme posledních 48 verzí každé skupiny a k tomu poslední verzi z každého dne za 30 dní zpět.
   delete from public.group_backups b
     using (select x.group_id, x.taken_at,
-                  row_number() over (partition by x.group_id order by x.taken_at desc) as rn
+                  row_number() over (partition by x.group_id order by x.taken_at desc) as rn,
+                  row_number() over (partition by x.group_id, (x.taken_at at time zone 'Europe/Prague')::date order by x.taken_at desc) as in_day
            from public.group_backups x) old
-    where b.group_id = old.group_id and b.taken_at = old.taken_at and old.rn > 48;
+    where b.group_id = old.group_id and b.taken_at = old.taken_at and old.rn > 48
+      and not (old.in_day = 1 and b.taken_at > now() - interval '30 days');
 
   delete from public.group_backups b
     where b.taken_at < now() - interval '30 days'
@@ -493,7 +496,8 @@ grant execute on function public.list_backups(uuid), public.get_backup(uuid, tim
 create extension if not exists pg_cron with schema pg_catalog;
 grant usage on schema cron to postgres;
 grant all privileges on all tables in schema cron to postgres;
-select cron.schedule('vyrovnano-hodinova-zaloha', '0 * * * *', 'select public.backup_groups()');
+select cron.unschedule(jobid) from cron.job where jobname = 'vyrovnano-hodinova-zaloha';
+select cron.schedule('vyrovnano-zaloha', '*/15 * * * *', 'select public.backup_groups()');
 -- První záloha hned teď.
 select public.backup_groups();
 
