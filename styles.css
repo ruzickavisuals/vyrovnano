@@ -852,7 +852,7 @@ body.intro-go .tabbar { transition: translate 0.75s var(--ease) 0.25s; }
 .tour-slide h2 { margin: 6px 0 0; font-size: 26px; letter-spacing: -0.02em; line-height: 1.15; }
 .tour-slide p { margin: 0; color: var(--muted); font-size: 16px; line-height: 1.45; }
 .tour-slide p.hint { font-size: 13px; opacity: 0.8; }
-.tour-art { min-height: 170px; display: flex; flex-direction: column; align-items: stretch; justify-content: center; gap: 10px; margin-bottom: 8px; }
+.tour-art { min-height: 150px; display: flex; flex-direction: column; align-items: stretch; justify-content: center; gap: 10px; margin-bottom: 8px; }
 .tour-emoji { align-self: center; width: 132px; height: 132px; border-radius: 40px; display: grid; place-items: center; font-size: 68px; background: linear-gradient(150deg, var(--card), var(--accent-soft)); border: 1px solid var(--line); box-shadow: 0 24px 60px -20px var(--accent); animation: tour-float 4s ease-in-out infinite; }
 @keyframes tour-float { 50% { transform: translateY(-8px) rotate(-3deg); } }
 .tour-emoji.bell { transform-origin: 50% 20%; }

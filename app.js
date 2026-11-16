@@ -2152,14 +2152,15 @@ const PUSH_ASKED = 'vyrovnano.pushAsked';
 // Pár obrazovek, mezi kterými se přejíždí prstem do stran (nebo tlačítky). Poslední krok je živý:
 // notifikace se zapínají přímo v něm.
 const TOUR_KEY = 'vyrovnano.tour';
-function Tour({ canGroup, onDone }) {
+function Tour({ canGroup, demo, onDone }) {
   const [i, setI] = useState(0);
   const [push, setPush] = useState('loading'); // loading | unsupported | denied | on | off
   const [busy, setBusy] = useState(false);
   const [rung, setRung] = useState(false);
   const track = useRef();
-  useEffect(() => { pushState().then(setPush).catch(() => setPush('unsupported')); }, []);
-  const N = 5;
+  // `demo` = ukázka návodu bez přihlášení: notifikace se doopravdy nezapínají, jen se přehraje animace.
+  useEffect(() => { if (demo) setPush('off'); else pushState().then(setPush).catch(() => setPush('unsupported')); }, []);
+  const N = 6;
   const go = (n) => {
     const el = track.current;
     if (el) el.scrollTo({ left: Math.max(0, Math.min(N - 1, n)) * el.clientWidth, behavior: calm() ? 'auto' : 'smooth' });
@@ -2174,72 +2175,84 @@ function Tour({ canGroup, onDone }) {
     addEventListener('keydown', key);
     return () => removeEventListener('keydown', key);
   }, [i]);
+  const done = () => { setPush('on'); setRung(true); haptic('success'); celebrate(); };
   async function enable() {
+    if (demo) return done();
     setBusy(true);
     try {
       await enablePush(savePushSub);
-      setPush('on');
-      setRung(true);
-      haptic('success');
-      celebrate();
+      done();
     } catch {
       setPush(await pushState().catch(() => 'off'));
     }
     setBusy(false);
   }
   const needsInstall = push === 'unsupported' && isIos() && !isStandalone();
+  const last = i === N - 1;
   return html`
     <div class="tour" role="dialog" aria-label="Jak Vyrovnáno funguje">
-      <button class="btn link tour-skip" onClick=${() => onDone(false)}>Přeskočit</button>
+      <button class="btn link tour-skip" onClick=${() => onDone()}>Přeskočit návod</button>
       <div class="tour-track" ref=${track} onScroll=${onScroll}>
         <section class="tour-slide">
           <div class="tour-art"><span class="tour-emoji">👋</span></div>
           <h2>Vítej ve Vyrovnáno</h2>
-          <p>Společné výdaje bez tabulek, dohadů a trapného „kdo komu kolik“. Zabere to minutu.</p>
-          <p class="hint">Přejeď prstem doleva →</p>
+          <p>Společné útraty s kamarády, spolubydlícími nebo kolegy. Aplikace za vás hlídá, kdo komu kolik dluží.</p>
+          <p class="hint">Šest krátkých kroků. Přejeď prstem doleva →</p>
         </section>
         <section class="tour-slide">
           <div class="tour-art">
             <div class="tour-card"><span class="avatar">🏝️</span><span class="grow"><strong>Chorvatsko 2026</strong><small>4 lidi · sdílená</small></span></div>
             <div class="tour-chips"><em>Filip</em><em>Petr</em><em>Jana</em><em>+ pozvat odkazem</em></div>
           </div>
-          <h2>Založ skupinu a pozvi lidi</h2>
-          <p>Byt, dovolená, kancl. Ostatním pošleš odkaz, připojí se jedním klepnutím a všichni vidí totéž.</p>
+          <h2>1. Založ skupinu</h2>
+          <p>Byt, dovolená, kancl. Ostatním pošleš odkaz, přihlásí se a jsou uvnitř. Všichni pak vidí totéž.</p>
         </section>
         <section class="tour-slide">
           <div class="tour-art">
             <div class="tour-card"><span class="avatar">🍽️</span><span class="grow"><strong>Večeře</strong><small>platil(a) Petr</small></span><span class="right"><strong>1 200 Kč</strong><small class="neg">−300 Kč</small></span></div>
             <div class="tour-card"><span class="avatar">🏠</span><span class="grow"><strong>Nájem 🔁</strong><small>každý měsíc, sám</small></span><span class="right"><strong>18 000 Kč</strong><small class="recv">+9 000 Kč</small></span></div>
           </div>
-          <h2>Zapisuj výdaje</h2>
-          <p>Kdo platil a mezi koho se to dělí. Zbytek spočítá aplikace na halíř. Nájem nebo Netflix se umí zapisovat samy.</p>
+          <h2>2. Zapisuj, co kdo zaplatil</h2>
+          <p>Zadáš částku, kdo platil a mezi koho se dělí. Zbytek se spočítá sám. Nájem nebo Netflix nastavíš jednou a zapisují se samy.</p>
         </section>
         <section class="tour-slide">
           <div class="tour-art">
             <div class="tour-card"><span class="grow"><strong>Ty → Petr</strong><small>dlužíš</small></span><span class="right"><strong class="neg">300 Kč</strong></span><span class="tour-pill">Vyrovnat</span></div>
             <div class="tour-chips"><em>QR platba</em><em>Převod</em><em>Hotově</em></div>
           </div>
-          <h2>Vyrovnej se jedním klepnutím</h2>
-          <p>Aplikace řekne, kdo komu kolik pošle, aby plateb bylo co nejmíň. Zaplatíš QR kódem, převodem nebo hotově, klidně po částech.</p>
+          <h2>3. Vyrovnej se</h2>
+          <p>V záložce Dluhy vidíš, komu poslat kolik. Zaplatíš QR kódem, převodem nebo hotově, klidně po částech.</p>
+          <p class="hint">Tip: doplň si v profilu číslo účtu, ať ti ostatní můžou platit QR kódem.</p>
         </section>
         <section class="tour-slide">
           <div class="tour-art"><span class=${'tour-emoji bell' + (rung ? ' rung' : '')}>${push === 'on' ? '✅' : '🔔'}</span></div>
-          <h2>${push === 'on' ? 'Notifikace jsou zapnuté' : 'Zapni si notifikace'}</h2>
+          <h2>${push === 'on' ? 'Notifikace jsou zapnuté' : '4. Nech si dát vědět'}</h2>
           <p>${push === 'on'
-            ? 'Paráda. Dozvíš se o nových výdajích, splátkách i o tom, že je čas se vyrovnat.'
-            : 'Hned se dozvíš, když někdo přidá výdaj, pošle ti peníze, nebo když je čas se vyrovnat.'}</p>
+            ? 'Paráda. Ozveme se jen s tím, co se týká tebe. Podrobnosti doladíš v Účet → Notifikace.'
+            : 'Nový výdaj, splátka nebo připomínka, že je čas se vyrovnat. Chodí jen to, co se týká tebe.'}</p>
           ${push === 'off' && html`<button class="btn primary wide tour-cta" disabled=${busy} onClick=${enable}>${busy ? 'Moment…' : '🔔 Zapnout notifikace'}</button>`}
           ${push === 'denied' && html`<p class="hint">Notifikace jsou zakázané v nastavení zařízení. Povolíš je tam a pak v Účet → Notifikace.</p>`}
           ${push === 'unsupported' && html`<p class="hint">${needsInstall
             ? 'Na iPhonu fungují notifikace jen v aplikaci přidané na plochu: v Safari klepni na Sdílet → Přidat na plochu a otevři Vyrovnáno odtamtud.'
             : 'Tento prohlížeč notifikace nepodporuje. Zapnout je můžeš na telefonu.'}</p>`}
-          <button class=${'btn wide ' + (push === 'off' ? '' : 'primary')} onClick=${() => onDone(canGroup)}>${canGroup ? 'Vytvořit první skupinu' : 'Jdeme na to'}</button>
+          ${push !== 'on' && html`<p class="hint">Nemusíš hned. Zapneš je kdykoli později.</p>`}
+        </section>
+        <section class="tour-slide">
+          <div class="tour-art">
+            <div class="tour-card"><span class="avatar">🔒</span><span class="grow"><strong>Soukromé skupiny</strong><small>vidí je jen lidé, které pozveš</small></span></div>
+            <div class="tour-card"><span class="avatar">📱</span><span class="grow"><strong>Dvoufázové ověření</strong><small>k heslu ještě kód z telefonu</small></span></div>
+            <div class="tour-card"><span class="avatar">💾</span><span class="grow"><strong>Automatické zálohy</strong><small>každou hodinu, nic se neztratí</small></span></div>
+          </div>
+          <h2>5. Máš to v bezpečí</h2>
+          <p>Jde o peníze, tak účet zamkni pořádně. Dvoufázové ověření zapneš v Účet → Účet a zabezpečení.</p>
+          <button class="btn primary wide tour-cta" onClick=${() => onDone(canGroup ? 'group' : '')}>${canGroup ? 'Vytvořit první skupinu' : 'Hotovo, jdeme na to'}</button>
+          ${!demo && html`<button class="btn link wide" onClick=${() => onDone('security')}>Zapnout dvoufázové ověření</button>`}
         </section>
       </div>
       <div class="tour-nav">
         <button class="btn small" disabled=${i === 0} onClick=${() => go(i - 1)} aria-label="Zpět">‹</button>
         <div class="tour-dots" aria-hidden="true">${Array.from({ length: N }, (_, n) => html`<i class=${n === i ? 'on' : ''} onClick=${() => go(n)}></i>`)}</div>
-        <button class="btn small primary" disabled=${i === N - 1} onClick=${() => go(i + 1)} aria-label="Další">›</button>
+        <button class="btn small primary" disabled=${last} onClick=${() => go(i + 1)} aria-label="Další">›</button>
       </div>
     </div>`;
 }
@@ -2382,6 +2395,8 @@ function PushSettings({ focus }) {
 }
 
 function ProfileSheet({ focus, profile, user, admin, groupCount, onSave, onLogout, onDeleteAccount, onImport, onExportAll, onTour }) {
+  const secRef = useRef();
+  useEffect(() => { if (focus === 'security') setTimeout(() => secRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 350); }, []);
   const [name, setName] = useState(profile.name);
   const [avatar, setAvatar] = useState(profile.avatar);
   const [iban, setIban] = useState(profile.iban || '');
@@ -2444,7 +2459,7 @@ function ProfileSheet({ focus, profile, user, admin, groupCount, onSave, onLogou
       </button>
 
       ${user && html`
-        <section class="card set-card">
+        <section class="card set-card" ref=${secRef}>
           <h3>Účet a zabezpečení</h3>
           <dl class="facts">
             <dt>E-mail</dt><dd>${user.email}</dd>
@@ -2978,6 +2993,13 @@ function App({ user, recovery }) {
     }, 1500);
     return () => clearTimeout(t);
   }, []);
+  // Správci aplikace se přepracovaný návod ukáže jednou i se skupinami, aby viděl, co uvidí nováčci.
+  useEffect(() => {
+    if (!admin) return;
+    try { if (localStorage.getItem(TOUR_KEY + 'Admin') === '2') return; localStorage.setItem(TOUR_KEY + 'Admin', '2'); } catch { return; }
+    setSheet(null);
+    setTour(true);
+  }, [admin]);
   // Okno „Co je nového“: jednou na zařízení, a jen tomu, kdo už aplikaci používal (má v ní nějakou skupinu).
   useEffect(() => {
     if (!user || sheet || needsWho || tour) return;
@@ -3237,7 +3259,7 @@ function App({ user, recovery }) {
           <${MoveSheet} group=${group} groups=${groups} pay=${sheet.pay} onMove=${(g, f, t) => moveDebt(sheet.pay, g, f, t)} />
         <//>`}
       ${tour && html`<${Tour} canGroup=${groups.length === 0}
-        onDone=${(newGroup) => { setTour(false); if (newGroup === true) setSheet({ type: 'group' }); }} />`}
+        onDone=${(next) => { setTour(false); if (next === 'group') setSheet({ type: 'group' }); else if (next === 'security') setSheet({ type: 'profile', focus: 'security' }); }} />`}
       ${sheet?.type === 'news' && html`
         <${Sheet} title="Co je nového" onClose=${close}>
           <${NewsSheet} onDone=${close} onSettings=${() => setSheet({ type: 'profile', focus: 'push' })} />
@@ -3296,6 +3318,9 @@ function Root() {
     return () => document.removeEventListener('visibilitychange', check);
   }, []);
 
+  // Ukázka návodu bez přihlášení (adresa končící #navod): jen k prohlédnutí, nic se neukládá.
+  const [demo, setDemo] = useState(location.hash === '#navod');
+  if (demo) return html`<${Tour} demo=${true} canGroup=${false} onDone=${() => { history.replaceState(null, '', location.pathname); setDemo(false); }} />`;
   if (!boot) return html`<div class="empty">Načítám…</div>`;
   if (syncEnabled && !sess) return html`<${AuthScreen} notice=${boot.error} /><${DialogHost} />`;
   if (syncEnabled && sess.mfa && !sess.mfa.ok) return html`<${MfaScreen} factorId=${sess.mfa.id} /><${DialogHost} />`;
