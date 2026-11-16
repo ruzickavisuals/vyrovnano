@@ -6,6 +6,16 @@ import { SUPABASE_URL, SUPABASE_KEY } from './config.js';
 const BASE = SUPABASE_URL.replace(/\/$/, '') + '/auth/v1';
 const SKEY = 'vyrovnano.session';
 const here = () => location.origin + location.pathname;
+// Adresa pro návrat z přihlášení. Čekající pozvánku do skupiny pošleme s sebou, aby se neztratila,
+// ani když se přihlášení dokončí v jiném prohlížeči (třeba odkaz otevřený v Messengeru a návrat do Safari).
+function back() {
+  let t = '';
+  try {
+    const j = JSON.parse(localStorage.getItem('vyrovnano.join'));
+    if (j && /^[a-f0-9]{32}$/.test(j.t)) t = j.t;
+  } catch {}
+  return here() + (t ? '?join=' + t : '');
+}
 
 let session = null;
 try {
@@ -112,7 +122,7 @@ async function checkPassword(password) {
 // Vrací 'in' (rovnou přihlášen) nebo 'confirm' (je potřeba potvrdit e-mail).
 export async function signUp(email, password) {
   await checkPassword(password);
-  const j = await call('/signup?redirect_to=' + encodeURIComponent(here()), { body: { email, password } });
+  const j = await call('/signup?redirect_to=' + encodeURIComponent(back()), { body: { email, password } });
   if (j.access_token) {
     store(j);
     return 'in';
@@ -128,7 +138,7 @@ export async function signIn(email, password) {
 }
 
 export function signInWithGoogle() {
-  location.assign(`${BASE}/authorize?provider=google&redirect_to=${encodeURIComponent(here())}`);
+  location.assign(`${BASE}/authorize?provider=google&redirect_to=${encodeURIComponent(back())}`);
 }
 
 export async function sendPasswordReset(email) {

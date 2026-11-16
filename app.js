@@ -29,6 +29,14 @@ function stashedJoin() {
   } catch {}
   return null;
 }
+// Pozvánka, která se vrátila v adrese z přihlášení (viz back() v auth.js): uložíme ji a adresu vyčistíme.
+try {
+  const q = new URLSearchParams(location.search).get('join');
+  if (q !== null) {
+    if (/^[a-f0-9]{32}$/.test(q)) stashJoin(q);
+    history.replaceState(null, '', location.pathname + location.hash);
+  }
+} catch {}
 // Z vloženého textu (celý odkaz nebo jen kód) vytáhne kód pozvánky.
 const inviteToken = (text) => (String(text).toLowerCase().match(/(?:join=|^\s*)([a-f0-9]{32})\s*$/) || [])[1] || null;
 function load(key, demo) {
