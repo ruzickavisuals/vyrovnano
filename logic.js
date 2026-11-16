@@ -110,7 +110,7 @@ export function titleStarts(group) {
     s.forms[p] = (s.forms[p] || 0) + 1;
     seen.set(k, s);
   }
-  const out = (group.cats || []).map((c) => ({ label: c.n, e: c.e }));
+  const out = (group.cats || []).map((c) => ({ label: c.n, e: c.e, id: c.id }));
   const have = new Set(out.map((o) => fold(o.label)));
   const auto = [...seen.entries()].filter(([k, s]) => s.n >= 3 && !have.has(k) && !customCategory(group, k))
     .sort((a, b) => b[1].n - a[1].n).slice(0, 12 - Math.min(out.length, 8));

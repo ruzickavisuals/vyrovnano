@@ -1330,6 +1330,7 @@ function EntryForm({ group, entry, repeat, onSave, onDelete }) {
                 onClick=${() => {
                   const t = s.label + ' - ';
                   typeTitle(t);
+                  if (s.id && !catTouched) setCategory(s.id); // vybraná vlastní kategorie platí rovnou
                   haptic();
                   const el = titleRef.current;
                   if (el) { el.focus(); setTimeout(() => { try { el.setSelectionRange(t.length, t.length); } catch {} }, 0); }
