@@ -30,15 +30,27 @@ function stashedJoin() {
   return null;
 }
 // Pozvánka, která se vrátila v adrese z přihlášení (viz back() v auth.js): uložíme ji a adresu vyčistíme.
+// Kód pozvánky v adrese. Hledáme ho kdekoli za ? i za #, protože některé aplikace (Messenger, Instagram)
+// si do odkazu přidávají vlastní sledovací přívěsky a přesný tvar adresy tím rozbijí.
+// Vrací kód, null (v adrese žádná pozvánka není), nebo false (pozvánka tam je, ale poškozená či neúplná).
+function urlInvite() {
+  let raw = location.search + location.hash;
+  try { raw = decodeURIComponent(raw); } catch {}
+  if (!/join=/i.test(raw)) return null;
+  const m = raw.match(/join=([a-f0-9]{32})(?![a-f0-9])/i);
+  return m ? m[1].toLowerCase() : false;
+}
+// Při startu: pozvánku z adresy si uložíme (přežije přihlášení) a adresu vyčistíme. Přihlašovací údaje za # necháme být.
+let brokenInvite = false;
 try {
-  const q = new URLSearchParams(location.search).get('join');
-  if (q !== null) {
-    if (/^[a-f0-9]{32}$/.test(q)) stashJoin(q);
-    history.replaceState(null, '', location.pathname + location.hash);
+  const t = urlInvite();
+  if (t !== null) {
+    if (t) stashJoin(t); else brokenInvite = true;
+    history.replaceState(null, '', location.pathname + (/access_token=|error/.test(location.hash) ? location.hash : ''));
   }
 } catch {}
 // Z vloženého textu (celý odkaz nebo jen kód) vytáhne kód pozvánky.
-const inviteToken = (text) => (String(text).toLowerCase().match(/(?:join=|^\s*)([a-f0-9]{32})\s*$/) || [])[1] || null;
+const inviteToken = (text) => (String(text).toLowerCase().match(/(?:join=|^\s*)([a-f0-9]{32})(?![a-f0-9])/) || [])[1] || null;
 function load(key, demo) {
   try {
     const d = JSON.parse(localStorage.getItem(key));
@@ -2394,14 +2406,14 @@ function App({ user, recovery }) {
   }
   useEffect(() => {
     const fromHash = () => {
-      const m = location.hash.match(/^#join=([a-f0-9]{32})$/);
-      if (!m) return;
+      const t = urlInvite();
+      if (t === null) return;
       history.replaceState(null, '', location.pathname);
-      join(m[1]);
+      if (t) join(t); else notify('Odkaz z pozvánky je neúplný nebo poškozený. Popros o nový a otevři ho celý.');
     };
     const stashed = stashedJoin();
-    if (stashed && !location.hash.startsWith('#join=')) join(stashed);
-    fromHash();
+    if (stashed) join(stashed);
+    else if (brokenInvite) { brokenInvite = false; notify('Odkaz z pozvánky je neúplný nebo poškozený. Popros o nový a otevři ho celý.'); }
     addEventListener('hashchange', fromHash);
     return () => removeEventListener('hashchange', fromHash);
   }, []);
@@ -2803,11 +2815,6 @@ function Root() {
   useEffect(() => {
     if (!syncEnabled) return;
     // Pozvánku otevřenou bez přihlášení si odložíme a použijeme hned po přihlášení.
-    const m = location.hash.match(/^#join=([a-f0-9]{32})$/);
-    if (m && !getSession()) {
-      stashJoin(m[1]);
-      history.replaceState(null, '', location.pathname);
-    }
     consumeUrl().then(setBoot).catch(() => setBoot({ error: 'Přihlášení se nepodařilo dokončit. Zkus to prosím znovu.' }));
     // Dvoufázové ověření mohlo být zapnuto nebo vypnuto na jiném zařízení; zjistíme to při startu a při návratu do aplikace.
     const check = () => { if (!document.hidden) refreshMfa().catch(() => {}); };
