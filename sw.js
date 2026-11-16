@@ -1,7 +1,7 @@
 // Rychlý start i offline: soubory aplikace se berou rovnou z paměti zařízení a na pozadí se
 // při každém otevření stáhne čerstvá verze. Vymění se celá najednou (nikdy napůl) a aplikace se na ni sama přepne.
 // Ukládají se jen soubory aplikace – nikdy data účtu ani skupin ze serveru.
-const CACHE = 'vyrovnano-v17';
+const CACHE = 'vyrovnano-v18';
 const ASSETS = [
   './', 'index.html', 'styles.css', 'app.js', 'logic.js', 'sync.js', 'auth.js', 'push.js', 'import.js', 'emoji.js', 'config.js',
   'vendor/preact-htm.js', 'vendor/qrcode.js', 'manifest.webmanifest', 'privacy.html',

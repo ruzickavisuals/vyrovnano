@@ -123,6 +123,33 @@ let lastTap = { x: innerWidth / 2, y: innerHeight / 2 };
 document.addEventListener('pointerdown', (e) => { lastTap = { x: e.clientX, y: e.clientY }; }, { passive: true, capture: true });
 
 // Krátký výbuch konfet v barvách aplikace (asi vteřina, bez zvuku). Použije se při úhradě dluhu.
+// Haptická odezva. iPhone webovým aplikacím vibrace nedovolí, ale systémový přepínač při přepnutí jemně
+// ťukne – proto na okamžik vytvoříme neviditelný přepínač a „klepneme“ na něj (funguje od iOS 17.4,
+// jen přímo při dotyku uživatele). Jinde (Android) použijeme běžnou vibraci. Druhy: light = jedno ťuknutí,
+// success = dvě rychlá za sebou.
+function tick() {
+  try {
+    const label = document.createElement('label');
+    label.setAttribute('aria-hidden', 'true');
+    label.style.display = 'none';
+    const input = document.createElement('input');
+    input.type = 'checkbox';
+    input.setAttribute('switch', '');
+    label.appendChild(input);
+    document.head.appendChild(label);
+    label.click();
+    document.head.removeChild(label);
+  } catch {}
+}
+const IS_IOS = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+function haptic(kind = 'light') {
+  try {
+    if (!IS_IOS) { if (navigator.vibrate) navigator.vibrate(kind === 'success' ? [12, 60, 18] : 10); return; }
+    tick();
+    if (kind === 'success') setTimeout(tick, 110);
+  } catch {}
+}
+
 function celebrate() {
   if (calm()) return;
   const css = getComputedStyle(document.documentElement);
@@ -282,7 +309,7 @@ function Seg({ options, value, onChange }) {
   return html`
     <div class="seg">
       ${options.map(([v, label]) => html`
-        <button type="button" class=${v === value ? 'on' : ''} onClick=${() => onChange(v)}>${label}</button>
+        <button type="button" class=${v === value ? 'on' : ''} onClick=${() => { if (v !== value) haptic(); onChange(v); }}>${label}</button>
       `)}
     </div>
   `;
@@ -2121,6 +2148,102 @@ function MfaScreen({ factorId }) {
 
 // Nabídka notifikací při prvním spuštění. Zapnutí musí být přímo na klepnutí, jinak ho iPhone nepovolí.
 const PUSH_ASKED = 'vyrovnano.pushAsked';
+/* ---------- Návod pro nové uživatele ---------- */
+// Pár obrazovek, mezi kterými se přejíždí prstem do stran (nebo tlačítky). Poslední krok je živý:
+// notifikace se zapínají přímo v něm.
+const TOUR_KEY = 'vyrovnano.tour';
+function Tour({ canGroup, onDone }) {
+  const [i, setI] = useState(0);
+  const [push, setPush] = useState('loading'); // loading | unsupported | denied | on | off
+  const [busy, setBusy] = useState(false);
+  const [rung, setRung] = useState(false);
+  const track = useRef();
+  useEffect(() => { pushState().then(setPush).catch(() => setPush('unsupported')); }, []);
+  const N = 5;
+  const go = (n) => {
+    const el = track.current;
+    if (el) el.scrollTo({ left: Math.max(0, Math.min(N - 1, n)) * el.clientWidth, behavior: calm() ? 'auto' : 'smooth' });
+  };
+  const onScroll = () => {
+    const el = track.current;
+    const n = Math.round(el.scrollLeft / el.clientWidth);
+    if (n !== i) { setI(n); haptic(); }
+  };
+  useEffect(() => {
+    const key = (e) => { if (e.key === 'ArrowRight') go(i + 1); else if (e.key === 'ArrowLeft') go(i - 1); };
+    addEventListener('keydown', key);
+    return () => removeEventListener('keydown', key);
+  }, [i]);
+  async function enable() {
+    setBusy(true);
+    try {
+      await enablePush(savePushSub);
+      setPush('on');
+      setRung(true);
+      haptic('success');
+      celebrate();
+    } catch {
+      setPush(await pushState().catch(() => 'off'));
+    }
+    setBusy(false);
+  }
+  const needsInstall = push === 'unsupported' && isIos() && !isStandalone();
+  return html`
+    <div class="tour" role="dialog" aria-label="Jak Vyrovnáno funguje">
+      <button class="btn link tour-skip" onClick=${() => onDone(false)}>Přeskočit</button>
+      <div class="tour-track" ref=${track} onScroll=${onScroll}>
+        <section class="tour-slide">
+          <div class="tour-art"><span class="tour-emoji">👋</span></div>
+          <h2>Vítej ve Vyrovnáno</h2>
+          <p>Společné výdaje bez tabulek, dohadů a trapného „kdo komu kolik“. Zabere to minutu.</p>
+          <p class="hint">Přejeď prstem doleva →</p>
+        </section>
+        <section class="tour-slide">
+          <div class="tour-art">
+            <div class="tour-card"><span class="avatar">🏝️</span><span class="grow"><strong>Chorvatsko 2026</strong><small>4 lidi · sdílená</small></span></div>
+            <div class="tour-chips"><em>Filip</em><em>Petr</em><em>Jana</em><em>+ pozvat odkazem</em></div>
+          </div>
+          <h2>Založ skupinu a pozvi lidi</h2>
+          <p>Byt, dovolená, kancl. Ostatním pošleš odkaz, připojí se jedním klepnutím a všichni vidí totéž.</p>
+        </section>
+        <section class="tour-slide">
+          <div class="tour-art">
+            <div class="tour-card"><span class="avatar">🍽️</span><span class="grow"><strong>Večeře</strong><small>platil(a) Petr</small></span><span class="right"><strong>1 200 Kč</strong><small class="neg">−300 Kč</small></span></div>
+            <div class="tour-card"><span class="avatar">🏠</span><span class="grow"><strong>Nájem 🔁</strong><small>každý měsíc, sám</small></span><span class="right"><strong>18 000 Kč</strong><small class="recv">+9 000 Kč</small></span></div>
+          </div>
+          <h2>Zapisuj výdaje</h2>
+          <p>Kdo platil a mezi koho se to dělí. Zbytek spočítá aplikace na halíř. Nájem nebo Netflix se umí zapisovat samy.</p>
+        </section>
+        <section class="tour-slide">
+          <div class="tour-art">
+            <div class="tour-card"><span class="grow"><strong>Ty → Petr</strong><small>dlužíš</small></span><span class="right"><strong class="neg">300 Kč</strong></span><span class="tour-pill">Vyrovnat</span></div>
+            <div class="tour-chips"><em>QR platba</em><em>Převod</em><em>Hotově</em></div>
+          </div>
+          <h2>Vyrovnej se jedním klepnutím</h2>
+          <p>Aplikace řekne, kdo komu kolik pošle, aby plateb bylo co nejmíň. Zaplatíš QR kódem, převodem nebo hotově, klidně po částech.</p>
+        </section>
+        <section class="tour-slide">
+          <div class="tour-art"><span class=${'tour-emoji bell' + (rung ? ' rung' : '')}>${push === 'on' ? '✅' : '🔔'}</span></div>
+          <h2>${push === 'on' ? 'Notifikace jsou zapnuté' : 'Zapni si notifikace'}</h2>
+          <p>${push === 'on'
+            ? 'Paráda. Dozvíš se o nových výdajích, splátkách i o tom, že je čas se vyrovnat.'
+            : 'Hned se dozvíš, když někdo přidá výdaj, pošle ti peníze, nebo když je čas se vyrovnat.'}</p>
+          ${push === 'off' && html`<button class="btn primary wide tour-cta" disabled=${busy} onClick=${enable}>${busy ? 'Moment…' : '🔔 Zapnout notifikace'}</button>`}
+          ${push === 'denied' && html`<p class="hint">Notifikace jsou zakázané v nastavení zařízení. Povolíš je tam a pak v Účet → Notifikace.</p>`}
+          ${push === 'unsupported' && html`<p class="hint">${needsInstall
+            ? 'Na iPhonu fungují notifikace jen v aplikaci přidané na plochu: v Safari klepni na Sdílet → Přidat na plochu a otevři Vyrovnáno odtamtud.'
+            : 'Tento prohlížeč notifikace nepodporuje. Zapnout je můžeš na telefonu.'}</p>`}
+          <button class=${'btn wide ' + (push === 'off' ? '' : 'primary')} onClick=${() => onDone(canGroup)}>${canGroup ? 'Vytvořit první skupinu' : 'Jdeme na to'}</button>
+        </section>
+      </div>
+      <div class="tour-nav">
+        <button class="btn small" disabled=${i === 0} onClick=${() => go(i - 1)} aria-label="Zpět">‹</button>
+        <div class="tour-dots" aria-hidden="true">${Array.from({ length: N }, (_, n) => html`<i class=${n === i ? 'on' : ''} onClick=${() => go(n)}></i>`)}</div>
+        <button class="btn small primary" disabled=${i === N - 1} onClick=${() => go(i + 1)} aria-label="Další">›</button>
+      </div>
+    </div>`;
+}
+
 // Okno „Co je nového“: na každém zařízení se ukáže jednou. Při další velké novince stačí změnit označení verze.
 const NEWS_KEY = 'vyrovnano.news';
 const NEWS_VERSION = '2026-11-automatizace';
@@ -2258,7 +2381,7 @@ function PushSettings({ focus }) {
   `;
 }
 
-function ProfileSheet({ focus, profile, user, admin, groupCount, onSave, onLogout, onDeleteAccount, onImport, onExportAll }) {
+function ProfileSheet({ focus, profile, user, admin, groupCount, onSave, onLogout, onDeleteAccount, onImport, onExportAll, onTour }) {
   const [name, setName] = useState(profile.name);
   const [avatar, setAvatar] = useState(profile.avatar);
   const [iban, setIban] = useState(profile.iban || '');
@@ -2336,6 +2459,7 @@ function ProfileSheet({ focus, profile, user, admin, groupCount, onSave, onLogou
       <section class="card set-card">
         <h3>Data</h3>
         <button class="btn wide" onClick=${onExportAll}>Stáhnout všechny moje skupiny</button>
+        ${onTour && html`<button class="btn wide" onClick=${onTour}>Pustit si návod znovu</button>`}
         <p class="hint">Soubor se zálohou všech skupin, výdajů a členů. Ulož si ho tam, kam nemá přístup nikdo cizí.</p>
         <button class="btn wide" onClick=${onImport}>Importovat skupinu ze Settle Up</button>
       </section>
@@ -2746,6 +2870,7 @@ function App({ user, recovery }) {
       out = { ...logged(out, 'group', `nastaveno opakování „${e.title}“ (${fmt(e.amount, e.currency)}, ${every === 'week' ? 'každý týden' : 'každý měsíc'})`),
         rec: [...(out.rec || []), r].slice(-50), mu: now };
     }
+    if (!push) haptic(has ? 'light' : 'success');
     putGroup(out);
   };
   async function removeRec(r) {
@@ -2794,6 +2919,7 @@ function App({ user, recovery }) {
     announce(group, e.kind === 'transfer'
       ? `smazána platba ${nameOf(group, e.paidBy)} → ${nameOf(group, Object.keys(e.parts)[0])} · ${fmt(e.amount, e.currency)}`
       : `smazán ${e.kind === 'income' ? 'příjem' : 'výdaj'} „${e.title}“ · ${fmt(e.amount, e.currency)}`, 'deleted', [e.paidBy, ...Object.keys(e.parts)], '🗑️');
+    haptic();
     putGroup(drop(logged(group, 'del', gone), id));
   }
   // Zápis platby z okna „Vyrovnat“: celý dluh, jeho část i přeplatek; způsob úhrady se uloží do názvu.
@@ -2806,6 +2932,7 @@ function App({ user, recovery }) {
       : amount > p.amount ? `uhrazeno ${fmt(amount, cur)} (${who}), ${how}; o ${fmt(amount - p.amount, cur)} víc, než byl dluh`
       : `uhrazeno ${fmt(amount, cur)} (${who}), ${how}`;
     if (amount >= p.amount) celebrate();
+    haptic(amount >= p.amount ? 'success' : 'light');
     saveEntry({
       id: uid(), kind: 'transfer', title: `Uhrazeno ${how}`, amount, currency: cur, rate: 1,
       paidBy: p.from, mode: 'equal', parts: { [p.to]: 1 }, category: 'other', date: /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : today(),
@@ -2835,16 +2962,32 @@ function App({ user, recovery }) {
     close();
   }
   const needsWho = group && !group.members.some((m) => m.id === group.me);
+  // Návod: úplně novému uživateli (po chvíli pořád žádná skupina) se ukáže jednou. Kdo už skupiny má, ten ho nepotřebuje;
+  // znovu si ho může pustit v nastavení účtu.
+  const [tour, setTour] = useState(false);
+  useEffect(() => {
+    if (!user) return;
+    try { if (localStorage.getItem(TOUR_KEY)) return; } catch { return; }
+    const t = setTimeout(() => {
+      try { localStorage.setItem(TOUR_KEY, '1'); } catch {}
+      if (ref.current.length) return;
+      // Nováčkovi neukazujeme „co je nového“ ani zvláštní dotaz na notifikace, obojí je v návodu.
+      try { localStorage.setItem(NEWS_KEY, NEWS_VERSION); localStorage.setItem(PUSH_ASKED, '1'); } catch {}
+      setSheet(null);
+      setTour(true);
+    }, 1500);
+    return () => clearTimeout(t);
+  }, []);
   // Okno „Co je nového“: jednou na zařízení, a jen tomu, kdo už aplikaci používal (má v ní nějakou skupinu).
   useEffect(() => {
-    if (!user || sheet || needsWho) return;
+    if (!user || sheet || needsWho || tour) return;
     try { if (localStorage.getItem(NEWS_KEY) === NEWS_VERSION) return; } catch { return; }
     const t = setTimeout(() => {
       try { localStorage.setItem(NEWS_KEY, NEWS_VERSION); } catch {}
       if (ref.current.length) setSheet((cur) => cur || { type: 'news' });
     }, 700);
     return () => clearTimeout(t);
-  }, [!!sheet, !!needsWho]);
+  }, [!!sheet, !!needsWho, tour]);
   // Při prvním spuštění na zařízení nabídneme zapnutí notifikací (jen jednou a jen tam, kde zapnout jdou).
   // Počkáme, až nic jiného nepřekáží: žádné otevřené okno ani výběr „Kdo jsi?“.
   useEffect(() => {
@@ -3093,6 +3236,8 @@ function App({ user, recovery }) {
         <${Sheet} title="Převést dluh" onClose=${close}>
           <${MoveSheet} group=${group} groups=${groups} pay=${sheet.pay} onMove=${(g, f, t) => moveDebt(sheet.pay, g, f, t)} />
         <//>`}
+      ${tour && html`<${Tour} canGroup=${groups.length === 0}
+        onDone=${(newGroup) => { setTour(false); if (newGroup === true) setSheet({ type: 'group' }); }} />`}
       ${sheet?.type === 'news' && html`
         <${Sheet} title="Co je nového" onClose=${close}>
           <${NewsSheet} onDone=${close} onSettings=${() => setSheet({ type: 'profile', focus: 'push' })} />
@@ -3117,6 +3262,7 @@ function App({ user, recovery }) {
         <${Sheet} title="Nastavení účtu" onClose=${close}>
           <${ProfileSheet} focus=${sheet.focus} profile=${profile} user=${user} admin=${admin} groupCount=${groups.length} onSave=${saveProfile}
             onLogout=${() => logout()} onDeleteAccount=${removeAccount} onExportAll=${exportAll}
+            onTour=${() => { setSheet(null); setTour(true); }}
             onImport=${() => { close(); importSettleUp(); }} />
         <//>`}
       ${sheet?.type === 'newpw' && html`
