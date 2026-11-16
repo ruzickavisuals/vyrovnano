@@ -8,6 +8,25 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { withSupabase } from "jsr:@supabase/server@^1";
 import webpush from "npm:web-push@3.6.7";
 
+// Starší verze aplikace posílají text bez ikony. Doplníme ji tady, aby zprávy vypadaly stejně
+// bez ohledu na to, jakou verzi má odesílatel. Text, který ikonou už začíná, necháme být.
+const plain = (t: string) => /^[\p{L}\p{N}„"(]/u.test(t);
+function decorate(text: string, type: string): string {
+  if (!text || !plain(text)) return text;
+  const joined = text.match(/nový člen ve skupině \((.+)\)\s*$/);
+  if (type === "joined" || joined) return joined ? `👋 ${joined[1]} se připojil(a) ke skupině` : `👋 ${text}`;
+  const icon = /zrušen převod/.test(text) ? "↩️"
+    : type === "deleted" || /smazán/.test(text) ? "🗑️"
+    : /převeden (do|ze) skupiny/.test(text) ? "🔀"
+    : /uhrazena část/.test(text) ? "💸"
+    : /uhrazeno/.test(text) ? "✅"
+    : /upraven/.test(text) ? "✏️"
+    : /příjem/.test(text) ? "💰"
+    : type === "paid" || /převod/.test(text) ? "💸"
+    : "🧾";
+  return `${icon} ${text}`;
+}
+
 export default {
   fetch: withSupabase({ auth: "user" }, async (req, ctx) => {
     try {
@@ -55,9 +74,18 @@ export default {
       if (!subs?.length) return Response.json({ sent: 0 });
 
       webpush.setVapidDetails("https://ruzickavisuals.github.io/vyrovnano/", keys.publicKey, keys.privateKey);
+      // Nadpis: název skupiny s její ikonou (starší verze aplikace posílají jen název).
+      let title = String(body.title ?? "Vyrovnáno");
+      if (body.test !== true && plain(title)) {
+        try {
+          const { data: g } = await admin.from("groups").select("emoji:data->>emoji").eq("id", gid).maybeSingle();
+          const emoji = (g as { emoji?: string } | null)?.emoji;
+          if (emoji) title = `${emoji} ${title}`;
+        } catch (_) { /* bez ikony */ }
+      }
       const payload = JSON.stringify({
-        title: String(body.title ?? "Vyrovnáno").slice(0, 80),
-        body: String(body.body ?? "").slice(0, 240),
+        title: title.slice(0, 80),
+        body: decorate(String(body.body ?? ""), String(body.type ?? "entry")).slice(0, 240),
         tag: gid,
       });
       let sent = 0;
