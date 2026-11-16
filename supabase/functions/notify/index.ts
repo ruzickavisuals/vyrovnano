@@ -27,9 +27,137 @@ function decorate(text: string, type: string): string {
   return `${icon} ${text}`;
 }
 
-export default {
-  fetch: withSupabase({ auth: "user" }, async (req, ctx) => {
+/* ---------- Měsíční připomínka dluhů ---------- */
+// Stejný výpočet jako v aplikaci (logic.js): podíly na haléř přesně, zůstatky a návrh plateb.
+type Entry = { amount: number; rate?: number; parts: Record<string, number>; paidBy: string; kind?: string };
+type Group = { name?: string; emoji?: string; currency?: string; members?: { id: string; name?: string; uid?: string }[]; entries?: Entry[] };
+function allocate(total: number, weights: Record<string, number>, first: string) {
+  const ids = Object.keys(weights ?? {}).filter((k) => weights[k] > 0).sort();
+  const sum = ids.reduce((s, k) => s + weights[k], 0);
+  const out: Record<string, number> = {};
+  if (!sum || !total) return out;
+  let used = 0;
+  const rem = ids.map((id) => {
+    const exact = (total * weights[id]) / sum;
+    const fl = Math.floor(exact);
+    out[id] = fl;
+    used += fl;
+    return { id, r: exact - fl };
+  });
+  rem.sort((a, b) => Number(b.id === first) - Number(a.id === first) || b.r - a.r || (a.id < b.id ? -1 : 1));
+  for (let i = 0; i < total - used; i++) out[rem[i % rem.length].id]++;
+  return out;
+}
+function settle(g: Group) {
+  const bal: Record<string, number> = Object.fromEntries((g.members ?? []).map((m) => [m.id, 0]));
+  for (const e of g.entries ?? []) {
+    const base = Math.round(e.amount * (e.rate || 1));
+    const s = allocate(base, e.parts, e.paidBy);
+    const sign = e.kind === "income" ? -1 : 1;
+    bal[e.paidBy] = (bal[e.paidBy] || 0) + sign * base;
+    for (const id in s) bal[id] = (bal[id] || 0) - sign * s[id];
+  }
+  const debt: { id: string; v: number }[] = [], cred: { id: string; v: number }[] = [];
+  for (const id in bal) {
+    if (bal[id] < 0) debt.push({ id, v: -bal[id] });
+    else if (bal[id] > 0) cred.push({ id, v: bal[id] });
+  }
+  const out: { from: string; to: string; amount: number }[] = [];
+  while (debt.length && cred.length) {
+    debt.sort((a, b) => b.v - a.v);
+    cred.sort((a, b) => b.v - a.v);
+    const d = debt[0], c = cred[0];
+    const amount = Math.min(d.v, c.v);
+    out.push({ from: d.id, to: c.id, amount });
+    d.v -= amount;
+    c.v -= amount;
+    if (!d.v) debt.shift();
+    if (!c.v) cred.shift();
+  }
+  return out;
+}
+function money(cents: number, currency: string) {
+  const whole = cents % 100 === 0;
+  try {
+    return new Intl.NumberFormat("cs-CZ", { style: "currency", currency, minimumFractionDigits: whole ? 0 : 2, maximumFractionDigits: whole ? 0 : 2 }).format(cents / 100);
+  } catch (_) {
+    return `${(cents / 100).toFixed(whole ? 0 : 2)} ${currency}`;
+  }
+}
+// Řádek typu „Petr 800 Kč (KANCL), Jana 250 Kč (Byt) a 2 další“.
+function listLine(items: { who: string; amount: number; cur: string; group: string }[]) {
+  items.sort((a, b) => b.amount - a.amount);
+  const shown = items.slice(0, 3).map((i) => `${i.who} ${money(i.amount, i.cur)} (${i.group})`).join(", ");
+  const more = items.length - 3;
+  return more > 0 ? `${shown} a ${more} další` : shown;
+}
+// Pro každého člověka sečte, komu dluží a kdo dluží jemu, přes všechny jeho skupiny.
+// Spouští ji jen plánovač databáze (1. den v měsíci); `only` omezí běh na jeden účet, `dry` nic neodešle.
+// deno-lint-ignore no-explicit-any
+async function monthly(admin: any, keys: { publicKey: string; privateKey: string }, only: string, dry: boolean) {
+  const { data: groups } = await admin.from("groups").select("id,data");
+  const { data: links } = await admin.from("group_members").select("group_id,user_id");
+  type Item = { who: string; amount: number; cur: string; group: string };
+  const per: Record<string, { owe: Item[]; get: Item[] }> = {};
+  for (const row of groups ?? []) {
+    const g = row.data as Group;
+    const users = new Set((links ?? []).filter((l: { group_id: string }) => l.group_id === row.id).map((l: { user_id: string }) => l.user_id));
+    const byId = Object.fromEntries((g.members ?? []).map((m) => [m.id, m]));
+    for (const p of settle(g)) {
+      if (p.amount < 100) continue; // drobné do jedné koruny neřešíme
+      const from = byId[p.from], to = byId[p.to];
+      const cur = g.currency || "CZK", group = g.name || "Skupina";
+      if (from?.uid && users.has(from.uid)) ((per[from.uid] ??= { owe: [], get: [] }).owe).push({ who: to?.name || "?", amount: p.amount, cur, group });
+      if (to?.uid && users.has(to.uid)) ((per[to.uid] ??= { owe: [], get: [] }).get).push({ who: from?.name || "?", amount: p.amount, cur, group });
+    }
+  }
+  let ids = Object.keys(per);
+  if (only) ids = ids.filter((id) => id === only);
+  if (!ids.length) return { people: 0, sent: 0 };
+  const { data: prefs } = await admin.from("user_prefs").select("user_id,notify").in("user_id", ids);
+  ids = ids.filter((id) => (prefs ?? []).find((x: { user_id: string }) => x.user_id === id)?.notify?.types?.reminder !== false);
+  const { data: subs } = await admin.from("push_subscriptions").select("user_id,endpoint,p256dh,auth").in("user_id", ids);
+  if (dry) return { people: ids.length, devices: subs?.length ?? 0, owing: ids.filter((id) => per[id].owe.length).length, sent: 0 };
+  webpush.setVapidDetails("https://ruzickavisuals.github.io/vyrovnano/", keys.publicKey, keys.privateKey);
+  let sent = 0;
+  const dead: string[] = [];
+  await Promise.all((subs ?? []).map(async (s: { user_id: string; endpoint: string; p256dh: string; auth: string }) => {
+    const { owe, get } = per[s.user_id];
+    const lines: string[] = [];
+    if (owe.length) lines.push(`💸 Dlužíš: ${listLine(owe)}`);
+    if (get.length) lines.push(`💰 Máš dostat: ${listLine(get)}`);
+    const payload = JSON.stringify({
+      title: owe.length ? "📅 Nový měsíc, čas se vyrovnat" : "📅 Nový měsíc, přehled dluhů",
+      body: lines.join("\n").slice(0, 300),
+      tag: "reminder",
+    });
     try {
+      await webpush.sendNotification({ endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } }, payload, { TTL: 3 * 86400 });
+      sent++;
+    } catch (e) {
+      const code = (e as { statusCode?: number }).statusCode;
+      if (code === 404 || code === 410) dead.push(s.endpoint);
+    }
+  }));
+  if (dead.length) await admin.from("push_subscriptions").delete().in("endpoint", dead);
+  return { people: ids.length, devices: subs?.length ?? 0, sent };
+}
+
+export default {
+  fetch: withSupabase({ auth: ["user", "none"] }, async (req, ctx) => {
+    try {
+      // Plánovač databáze se neprokazuje účtem, ale tajným heslem z tabulky app_secrets.
+      const cronKey = req.headers.get("x-cron-key");
+      if (cronKey && req.method === "POST") {
+        const a = ctx.supabaseAdmin;
+        const { data: c } = await a.from("app_secrets").select("value").eq("name", "cron").maybeSingle();
+        const want = (c?.value as { key?: string } | null)?.key;
+        if (!want || want.length < 32 || want !== cronKey) return Response.json({ error: "unauthorized" }, { status: 401 });
+        const { data: v } = await a.from("app_secrets").select("value").eq("name", "vapid").maybeSingle();
+        if (!v) return Response.json({ people: 0, sent: 0 });
+        const b = await req.json().catch(() => ({}));
+        return Response.json(await monthly(a, v.value, String(b.only ?? ""), b.dry === true));
+      }
       const me = ctx.userClaims?.id;
       if (!me) return Response.json({ error: "unauthorized" }, { status: 401 });
       const admin = ctx.supabaseAdmin;

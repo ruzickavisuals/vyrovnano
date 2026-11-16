@@ -654,16 +654,26 @@ function Home({ groups, profile, account, activeId, onOpen, onNew, onProfile, on
 /* ---------- Úvodní plocha (když není vybraná skupina) ---------- */
 
 const QUIPS = [
-  ['🤝', 'Dobré účty dělají dobré přátele. Špatné účty dělají dlouhé skupinové chaty.'],
-  ['💸', '„Pošlu ti to večer.“ Nejčastější lež hned po „už jsem na cestě“.'],
-  ['🧾', '„Účet dohromady, rozpočítáme si to potom.“ Slavná poslední slova.'],
-  ['🧠', 'Kdo platí, ten si pamatuje. Kdo dluží, zapomíná. Proto jsme tady.'],
-  ['🍻', 'Přátelství se pozná podle toho, kdo zaplatí první kolo. A kdo ho sem zapíše.'],
-  ['📮', 'Nikdo nerad posílá upomínky. Červené číslo to řekne za tebe.'],
-  ['☕', 'Peníze nejsou všechno. Ale je příjemné vědět, kdo ti dluží za kafe.'],
-  ['🎯', 'Dnes je krásný den někomu připomenout pětikilo.'],
-  ['🧮', 'Počítat umí každý. Dopočítat se nikdo. Od toho je tu tahle stránka.'],
-  ['🐢', 'Dluh není želva, sám neuteče. Ale taky sám nepřijde.'],
+  ['🤝', 'Dobré účty dělají dobré přátele. Špatné účty dělají pasivně agresivní skupinové chaty.'],
+  ['💸', '„Pošlu ti to večer.“ Nejčastější kec hned po „už jsem na cestě“.'],
+  ['🧾', '„Účet dohromady, rozpočítáme to potom.“ Slavná poslední slova před tím, než se všichni poserou.'],
+  ['🧠', 'Kdo platí, ten si pamatuje. Kdo dluží, má najednou paměť jako zlatá rybka.'],
+  ['🍻', 'Přátelství se pozná podle toho, kdo zaplatí první kolo. Hajzl podle toho, kdo zmizí před posledním.'],
+  ['📮', 'Nikdo nechce být ten otravný kokot, co upomíná. Červené číslo to udělá za tebe.'],
+  ['☕', 'Peníze nejsou všechno. Ale to kafe za 89 Kč ti stejně nedaruju, Karle.'],
+  ['🎯', 'Dnes je krásný den někomu připomenout pětikilo. A zkazit mu ho.'],
+  ['🧮', 'Počítat umí každý. Jen se pak záhadně nikdo nedopočítá. Od toho je tu tahle sračka, co funguje.'],
+  ['🐢', 'Dluh není želva, sám neuteče. Ale dlužník kupodivu běhat umí.'],
+  ['🥂', '„Já měl jenom jedno malý pivo.“ Jasně. A účet za čtyři litry se udělal sám.'],
+  ['🦗', 'Ticho po otázce „kdo ještě neposlal?“ je nejhlasitější zvuk na světě.'],
+  ['🧻', 'Kdo nikdy nekoupil hajzlpapír do společného bytu, ať první hodí kamenem. Nebo radši pošle stovku.'],
+  ['🙃', '„Nemám u sebe hotovost.“ V roce, kdy se dá zaplatit hodinkama, je to už jen výmluva na hovno.'],
+  ['⚖️', 'Rovným dílem je fér jen do chvíle, než si někdo objedná steak a tři negroni.'],
+  ['🏦', 'Nejsem banka. Banka by ti aspoň napočítala úroky a poslala exekutora.'],
+  ['👻', 'Někteří lidi po výplatě ožijí. Jiní se po ní vypaří jak pára nad hrncem.'],
+  ['🫠', 'Dlužit kamarádovi je jako mít kamínek v botě. Jde s tím chodit, ale jsi u toho za debila.'],
+  ['🎁', '„To je dobrý, to neřeš.“ Přeloženo: budu ti to připomínat do smrti.'],
+  ['🚬', 'Půjčit si stovku na cigára a vrátit ji umí jen jeden člověk z deseti. Zbytek devět jsou tví kamarádi.'],
 ];
 
 // Pozdrav, celkový stav přes všechny skupiny a náhodná hláška (vybraná jednou při zobrazení).
@@ -2054,7 +2064,7 @@ function PushSettings() {
     getNotifyPrefs().then((p) => setPrefs({ scope: p?.scope === 'all' ? 'all' : 'mine', types: p?.types || {} })).catch(() => {});
   }, []);
   const change = (next) => { setPrefs(next); setNotifyPrefs(next).catch(() => setMsg('Volbu se nepodařilo uložit. Zkus to prosím znovu.')); };
-  const KINDS = [['entry', 'Nové a upravené výdaje'], ['deleted', 'Smazané záznamy'], ['paid', 'Úhrady a převody dluhů'], ['joined', 'Noví členové skupiny']];
+  const KINDS = [['entry', 'Nové a upravené výdaje'], ['deleted', 'Smazané záznamy'], ['paid', 'Úhrady a převody dluhů'], ['joined', 'Noví členové skupiny'], ['reminder', 'Měsíční připomínka dluhů (1. den v měsíci)']];
   async function toggle() {
     setBusy(true);
     setMsg('');
@@ -2085,7 +2095,7 @@ function PushSettings() {
               ${busy ? 'Moment…' : state === 'on' ? 'Vypnout' : 'Zapnout'}
             </button>
           </div>
-          <p class="hint">${msg || 'Dostaneš zprávu, když někdo ve tvé skupině přidá, upraví nebo smaže výdaj, uhradí dluh nebo se připojí. Vlastní změny ti nechodí.'}</p>
+          <p class="hint">${msg || 'Dostaneš zprávu, když někdo ve tvé skupině přidá, upraví nebo smaže výdaj, uhradí dluh nebo se připojí. Vlastní změny ti nechodí. Prvního v měsíci ti navíc přijde přehled, komu dlužíš a kdo dluží tobě.'}</p>
           <div class="field">
             <span>Co mi má chodit</span>
             <${Seg} value=${prefs.scope} onChange=${(scope) => change({ ...prefs, scope })}

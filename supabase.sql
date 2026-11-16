@@ -508,3 +508,27 @@ grant execute on function
   public.save_group(uuid, jsonb, integer), public.join_group(text), public.leave_group(uuid),
   public.reset_invite(uuid), public.kick_member(uuid, uuid), public.delete_account()
   to authenticated;
+
+-- ===== Měsíční připomínka dluhů =====
+-- Prvního v měsíci v 8:00 UTC (9:00 v zimě, 10:00 v létě) zavolá databáze funkci „notify“,
+-- která každému pošle přehled, komu dluží a kdo dluží jemu. Prokazuje se náhodným heslem,
+-- které si databáze sama vygenerovala a které zná jen ona a serverová funkce.
+create extension if not exists pg_net;
+insert into public.app_secrets (name, value)
+  values ('cron', jsonb_build_object('key', encode(extensions.gen_random_bytes(32), 'hex')))
+  on conflict (name) do nothing;
+
+create or replace function public.monthly_reminder(p_only text default '', p_dry boolean default false)
+returns bigint
+language sql security definer set search_path = ''
+as $$
+  select net.http_post(
+    url := 'https://pfikocjcjleshidgwapi.supabase.co/functions/v1/notify',
+    headers := jsonb_build_object('Content-Type', 'application/json',
+      'x-cron-key', (select s.value ->> 'key' from public.app_secrets s where s.name = 'cron')),
+    body := jsonb_build_object('only', p_only, 'dry', p_dry),
+    timeout_milliseconds := 30000);
+$$;
+revoke execute on function public.monthly_reminder(text, boolean) from public, anon, authenticated;
+
+select cron.schedule('vyrovnano-mesicni-pripominka', '0 8 1 * *', 'select public.monthly_reminder()');
