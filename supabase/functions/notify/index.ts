@@ -211,6 +211,37 @@ async function daily(admin: any, keys: { publicKey: string; privateKey: string }
 export default {
   fetch: withSupabase({ auth: ["user", "none"] }, async (req, ctx) => {
     try {
+      // Úplná záloha dat pro majitele aplikace: stahuje ji jeho počítač a prokazuje se vlastním klíčem.
+      // V databázi je uložený jen otisk klíče (SHA-256), samotný klíč zná jen ten počítač.
+      const backupKey = req.headers.get("x-backup-key");
+      if (backupKey) {
+        const a = ctx.supabaseAdmin;
+        const { data: b } = await a.from("app_secrets").select("value").eq("name", "backup").maybeSingle();
+        const want = (b?.value as { hash?: string } | null)?.hash;
+        const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(backupKey));
+        const got = [...new Uint8Array(digest)].map((x) => x.toString(16).padStart(2, "0")).join("");
+        if (!want || want.length !== 64 || backupKey.length < 40 || want !== got) return Response.json({ error: "unauthorized" }, { status: 401 });
+        const [groups, members, prefs, admins] = await Promise.all([
+          a.from("groups").select("id,data,version,invite,owner,created_at,updated_at").order("created_at"),
+          a.from("group_members").select("group_id,user_id,joined_at").order("joined_at"),
+          a.from("user_prefs").select("user_id,notify"),
+          a.from("app_admins").select("user_id"),
+        ]);
+        if (groups.error || members.error) return Response.json({ error: "read failed" }, { status: 500 });
+        // Účty: jen kdo je kdo (bez hesel – ta má jen přihlašovací služba a ani tady k nim není přístup).
+        let users: unknown[] = [];
+        try {
+          const { data: u } = await a.auth.admin.listUsers({ page: 1, perPage: 1000 });
+          users = (u?.users ?? []).map((x: { id: string; email?: string; created_at?: string; app_metadata?: { provider?: string }; user_metadata?: { full_name?: string; name?: string } }) => ({
+            id: x.id, email: x.email ?? "", created_at: x.created_at, provider: x.app_metadata?.provider ?? "",
+            name: x.user_metadata?.full_name ?? x.user_metadata?.name ?? "",
+          }));
+        } catch (_) { /* záloha skupin je důležitější než seznam účtů */ }
+        return Response.json({
+          app: "vyrovnano", kind: "full-backup", taken_at: new Date().toISOString(),
+          groups: groups.data, group_members: members.data, user_prefs: prefs.data ?? [], app_admins: admins.data ?? [], users,
+        });
+      }
       // Plánovač databáze se neprokazuje účtem, ale tajným heslem z tabulky app_secrets.
       const cronKey = req.headers.get("x-cron-key");
       if (cronKey && req.method === "POST") {

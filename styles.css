@@ -884,3 +884,7 @@ button:disabled .hx { display: none; }
 
 /* ---------- Vlastní kategorie ---------- */
 .cat-emoji { width: 52px !important; flex: none; text-align: center; font-size: 20px; padding-left: 4px !important; padding-right: 4px !important; }
+
+/* ---------- Nabídka častých názvů ---------- */
+.chips.sugg { margin-top: -6px; padding: 8px; border-radius: 14px; background: var(--accent-soft); border: 1px solid var(--line); animation: tour-in 0.2s ease-out; }
+.chips.sugg .chip { position: relative; }

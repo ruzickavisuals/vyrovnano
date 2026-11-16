@@ -1,6 +1,6 @@
 import { html, render, useState, useEffect, useLayoutEffect, useMemo, useRef } from './vendor/preact-htm.js';
 import {
-  CATS, cat, catOf, guessCategory, learnedCategory, registerCats, customCategory, applyCats, CURRENCIES, uid, today, fmt, parseAmount, allocate, baseAmount, shares,
+  CATS, cat, catOf, guessCategory, learnedCategory, registerCats, customCategory, applyCats, titleStarts, CURRENCIES, uid, today, fmt, parseAmount, allocate, baseAmount, shares,
   balances, settle, stats, debtMove, vocative, toIban, spayd, dateLabel, seed, nextDue, runRecurring,
 } from './logic.js';
 import {
@@ -1234,6 +1234,20 @@ function EntryForm({ group, entry, repeat, onSave, onDelete }) {
   const [to, setTo] = useState(
     init.kind === 'transfer' ? Object.keys(init.parts)[0] : members.find((m) => m.id !== init.paidBy)?.id);
 
+  // Nabídka často používaných začátků názvu: ukáže se po klepnutí do pole, dokud v názvu není pomlčka.
+  const titleRef = useRef();
+  const [titleFocus, setTitleFocus] = useState(false);
+  const blurT = useRef(0);
+  const starts = useMemo(() => titleStarts(group), [group]);
+  const typed = title.trim().toLowerCase();
+  const sugg = /\s[-–—]/.test(title) ? [] : starts.filter((s) => !typed || (s.label.toLowerCase().startsWith(typed) && s.label.toLowerCase() !== typed));
+  // Kategorie se nastaví sama podle názvu, dokud ji uživatel nevybere ručně. Nejdřív klíčová slova skupiny,
+  // pak kam podobný záznam zařadila tahle skupina dřív, a teprve pak obecná klíčová slova.
+  function typeTitle(v) {
+    setTitle(v);
+    const g = customCategory(group, v) || learnedCategory(group.entries, v) || guessCategory(v);
+    if (!catTouched && g !== 'other') setCategory(g);
+  }
   const amount = parseAmount(amountStr);
   const rate = currency === group.currency ? 1 : parseFloat(rateStr.replace(',', '.')) || 0;
   const foreign = currency !== group.currency;
@@ -1304,14 +1318,23 @@ function EntryForm({ group, entry, repeat, onSave, onDelete }) {
       ${kind !== 'transfer' && html`
         <label class="field">
           <span>Za co</span>
-          <input placeholder="např. Večeře" maxlength="120" value=${title} onInput=${(e) => {
-            setTitle(e.target.value);
-            // Kategorie se nastaví sama podle názvu, dokud ji uživatel nevybere ručně.
-            // Nejdřív se zkusí, kam podobný záznam zařadila tahle skupina dřív; teprve pak obecná klíčová slova.
-            const g = customCategory(group, e.target.value) || learnedCategory(group.entries, e.target.value) || guessCategory(e.target.value);
-            if (!catTouched && g !== 'other') setCategory(g);
-          }} />
+          <input ref=${titleRef} placeholder="např. Večeře" maxlength="120" value=${title}
+            onFocus=${() => { clearTimeout(blurT.current); setTitleFocus(true); }}
+            onBlur=${() => { blurT.current = setTimeout(() => setTitleFocus(false), 250); }}
+            onInput=${(e) => typeTitle(e.target.value)} />
         </label>
+        ${titleFocus && sugg.length > 0 && html`
+          <div class="chips sugg" aria-label="Často používané názvy">
+            ${sugg.map((s) => html`
+              <button type="button" class="chip" onPointerDown=${(e) => e.preventDefault()} onMouseDown=${(e) => e.preventDefault()}
+                onClick=${() => {
+                  const t = s.label + ' - ';
+                  typeTitle(t);
+                  haptic();
+                  const el = titleRef.current;
+                  if (el) { el.focus(); setTimeout(() => { try { el.setSelectionRange(t.length, t.length); } catch {} }, 0); }
+                }}><span>${s.e}</span><span>${s.label}</span></button>`)}
+          </div>`}
         <div class="chips">
           ${[...(group.cats || []), ...CATS].map((c) => html`
             <button type="button" class=${'chip' + (c.id === category ? ' on' : '')} onClick=${() => { setCategory(c.id); setCatTouched(true); }}><span>${c.e}</span><span>${c.n}</span></button>

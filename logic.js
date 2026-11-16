@@ -94,6 +94,33 @@ export function customCategory(group, text) {
   }
   return '';
 }
+// Často používané začátky názvů ve skupině („Záloha – …“, „Balíček – …“), které se nabídnou při psaní nového záznamu.
+// Bere vlastní kategorie skupiny a k nim začátky, které se v názvech opakují aspoň třikrát
+// (část před pomlčkou, nebo celý krátký název). Vrací [{ label, e }] seřazené podle abecedy.
+export function titleStarts(group) {
+  const seen = new Map();
+  for (const e of group.entries) {
+    if (e.kind === 'transfer' || e.mv) continue;
+    const parts = String(e.title || '').split(/\s+[-–—]\s*|\s*[-–—]\s+/);
+    const p = parts[0].trim();
+    if (p.length < 2 || p.length > 30 || (parts.length < 2 && p.split(/\s+/).length > 3)) continue;
+    const k = fold(p);
+    const s = seen.get(k) || { n: 0, forms: {} };
+    s.n++;
+    s.forms[p] = (s.forms[p] || 0) + 1;
+    seen.set(k, s);
+  }
+  const out = (group.cats || []).map((c) => ({ label: c.n, e: c.e }));
+  const have = new Set(out.map((o) => fold(o.label)));
+  const auto = [...seen.entries()].filter(([k, s]) => s.n >= 3 && !have.has(k) && !customCategory(group, k))
+    .sort((a, b) => b[1].n - a[1].n).slice(0, 12 - Math.min(out.length, 8));
+  for (const [, s] of auto) {
+    const form = Object.entries(s.forms).sort((a, b) => b[1] - a[1])[0][0];
+    const label = form[0].toUpperCase() + form.slice(1);
+    out.push({ label, e: cat(guessCategory(label)).e });
+  }
+  return out.sort((a, b) => a.label.localeCompare(b.label, 'cs', { sensitivity: 'base' }));
+}
 // Zpětné zařazení: záznamy, jejichž název odpovídá klíčovým slovům vlastní kategorie, do ní přesune.
 export function applyCats(group, now = Date.now()) {
   let n = 0;
