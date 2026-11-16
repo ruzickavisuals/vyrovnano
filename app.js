@@ -18,6 +18,19 @@ import { pushSupported, isStandalone, isIos, pushState, enablePush, disablePush,
 
 const KEY = 'vyrovnano.v1';
 const JKEY = 'vyrovnano.join';
+// Pozvánka otevřená před přihlášením. Držíme ji v zařízení 7 dní, aby přežila přihlášení přes Google,
+// potvrzení e-mailu v novém panelu i zavření prohlížeče, a použijeme ji hned po přihlášení.
+const stashJoin = (t) => { try { localStorage.setItem(JKEY, JSON.stringify({ t, at: Date.now() })); } catch {} };
+const clearJoin = () => { try { localStorage.removeItem(JKEY); sessionStorage.removeItem(JKEY); } catch {} };
+function stashedJoin() {
+  try {
+    const j = JSON.parse(localStorage.getItem(JKEY));
+    if (j && /^[a-f0-9]{32}$/.test(j.t) && Date.now() - j.at < 7 * 864e5) return j.t;
+  } catch {}
+  return null;
+}
+// Z vloženého textu (celý odkaz nebo jen kód) vytáhne kód pozvánky.
+const inviteToken = (text) => (String(text).toLowerCase().match(/(?:join=|^\s*)([a-f0-9]{32})\s*$/) || [])[1] || null;
 function load(key, demo) {
   try {
     const d = JSON.parse(localStorage.getItem(key));
@@ -469,7 +482,29 @@ function EmojiPicker({ value, onChange }) {
 
 /* ---------- Domovská obrazovka ---------- */
 
-function Home({ groups, profile, account, activeId, onOpen, onNew, onProfile, onReorder, onSortByName, onSearch }) {
+// Záchranná cesta, když se pozvánka cestou ztratila: vložit odkaz ručně.
+function JoinBox({ onJoin }) {
+  const [text, setText] = useState('');
+  const [bad, setBad] = useState(false);
+  const go = (ev) => {
+    ev.preventDefault();
+    const t = inviteToken(text.trim());
+    if (!t) return setBad(true);
+    setText('');
+    onJoin(t);
+  };
+  return html`
+    <form class="join-box" onSubmit=${go}>
+      <b>Dostal(a) jsi pozvánku do skupiny?</b>
+      <p class="hint">Otevři odkaz z pozvánky znovu, nebo ho zkopíruj a vlož sem.</p>
+      <input value=${text} onInput=${(e) => { setText(e.target.value); setBad(false); }} placeholder="Odkaz z pozvánky"
+        aria-label="Odkaz z pozvánky" autocapitalize="off" autocorrect="off" spellcheck=${false} />
+      ${bad && html`<p class="hint neg">Tohle nevypadá jako odkaz z pozvánky. Zkopíruj ho celý.</p>`}
+      <button class="btn primary wide" disabled=${!text.trim()}>Připojit se ke skupině</button>
+    </form>`;
+}
+
+function Home({ groups, profile, account, activeId, onOpen, onNew, onProfile, onReorder, onSortByName, onSearch, onJoin }) {
   // Změna pořadí tažením celé karty. Na dotykovém displeji se karta „chytí“ krátkým podržením
   // (aby šlo seznamem normálně rolovat), myší stačí kartu stisknout a táhnout.
   // Během tažení se hýbe jen s kartami přes transform; pořadí se uloží až po puštění.
@@ -557,6 +592,7 @@ function Home({ groups, profile, account, activeId, onOpen, onNew, onProfile, on
           <div class="big">🧾</div>
           <p>Zatím tu není žádná skupina.</p>
         </div>
+        ${onJoin && html`<${JoinBox} onJoin=${onJoin} />`}
       `}
       ${groups.length > 1 && html`
         <div class="list-tools">
@@ -2048,7 +2084,8 @@ function AuthScreen({ notice }) {
   const [mode, setMode] = useState('in');
   const [email, setEmail] = useState('');
   const [pw, setPw] = useState('');
-  const [msg, setMsg] = useState(notice || '');
+  const [msg, setMsg] = useState(notice || (stashedJoin()
+    ? 'Máš otevřenou pozvánku do skupiny. Přihlas se nebo si vytvoř účet a skupina se ti načte sama.' : ''));
   const [busy, setBusy] = useState(false);
 
   async function submit(ev) {
@@ -2336,6 +2373,7 @@ function App({ user, recovery }) {
     if (!user) return notify('Sdílení zatím není zapnuté.');
     try {
       const row = await joinRemote(token);
+      clearJoin();
       if (!row) return notify('Pozvánka je neplatná nebo už byla zrušena.');
       setGroups((gs) => (gs.some((g) => g.id === row.id)
         ? gs
@@ -2353,9 +2391,8 @@ function App({ user, recovery }) {
       history.replaceState(null, '', location.pathname);
       join(m[1]);
     };
-    let stashed = null;
-    try { stashed = sessionStorage.getItem(JKEY); sessionStorage.removeItem(JKEY); } catch {}
-    if (stashed && /^[a-f0-9]{32}$/.test(stashed)) join(stashed);
+    const stashed = stashedJoin();
+    if (stashed && !location.hash.startsWith('#join=')) join(stashed);
     fromHash();
     addEventListener('hashchange', fromHash);
     return () => removeEventListener('hashchange', fromHash);
@@ -2648,7 +2685,8 @@ function App({ user, recovery }) {
             onNew=${() => setSheet({ type: 'group' })} onProfile=${() => setSheet({ type: 'profile' })}
             onSearch=${() => setSheet({ type: 'search', all: true })}
             onReorder=${(from, to) => setGroups((gs) => { const a = [...gs]; const [x] = a.splice(from, 1); a.splice(to, 0, x); return a; })}
-            onSortByName=${() => setGroups((gs) => [...gs].sort((a, b) => a.name.localeCompare(b.name, 'cs', { sensitivity: 'base' })))} />
+            onSortByName=${() => setGroups((gs) => [...gs].sort((a, b) => a.name.localeCompare(b.name, 'cs', { sensitivity: 'base' })))}
+            onJoin=${user ? join : null} />
         </aside>
         <section class=${'main-pane gc-' + (group?.color || 'teal')}>
           ${group
@@ -2759,7 +2797,7 @@ function Root() {
     // Pozvánku otevřenou bez přihlášení si odložíme a použijeme hned po přihlášení.
     const m = location.hash.match(/^#join=([a-f0-9]{32})$/);
     if (m && !getSession()) {
-      try { sessionStorage.setItem(JKEY, m[1]); } catch {}
+      stashJoin(m[1]);
       history.replaceState(null, '', location.pathname);
     }
     consumeUrl().then(setBoot).catch(() => setBoot({ error: 'Přihlášení se nepodařilo dokončit. Zkus to prosím znovu.' }));
