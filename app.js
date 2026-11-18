@@ -1166,7 +1166,7 @@ function Debts({ group, bal, onPay, onQr, onMove }) {
               <div class="pay">
                 <div class="pay-row">
                   <span class="pay-who"><${Avatar} m=${group.members.find((m) => m.id === p.from)} size=${40} /><span>${nameOf(group, p.from)}</span></span>
-                  <span class="pay-mid"><strong class=${'pay-amount' + (fmt(p.amount, cur).length > 11 ? ' long' : '')}>${fmt(p.amount, cur)}</strong><span class="pay-line" role="img" aria-label="platí"></span></span>
+                  <span class="pay-mid"><span class="pay-pill"><strong class=${'pay-amount' + (fmt(p.amount, cur).length > 11 ? ' long' : '')}>${fmt(p.amount, cur)}</strong><span class="pay-arrow" role="img" aria-label="platí"></span></span></span>
                   <span class="pay-who end"><span>${nameOf(group, p.to)}</span><${Avatar} m=${group.members.find((m) => m.id === p.to)} size=${40} /></span>
                 </div>
                 <div class="pay-actions">
