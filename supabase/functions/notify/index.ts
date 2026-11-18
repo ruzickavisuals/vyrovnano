@@ -79,7 +79,7 @@ function settle(g: Group) {
 function money(cents: number, currency: string) {
   const whole = cents % 100 === 0;
   try {
-    return new Intl.NumberFormat("cs-CZ", { style: "currency", currency, minimumFractionDigits: whole ? 0 : 2, maximumFractionDigits: whole ? 0 : 2 }).format(cents / 100);
+    return new Intl.NumberFormat("cs-CZ", { style: "currency", currency, minimumFractionDigits: whole ? 0 : 2, maximumFractionDigits: whole ? 0 : 2 }).format(cents / 100).replace(/[\s\u00a0\u202f](?=\d)/g, ".");
   } catch (_) {
     return `${(cents / 100).toFixed(whole ? 0 : 2)} ${currency}`;
   }
