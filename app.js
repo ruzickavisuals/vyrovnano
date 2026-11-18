@@ -1,6 +1,6 @@
 import { html, render, useState, useEffect, useLayoutEffect, useMemo, useRef } from './vendor/preact-htm.js';
 import {
-  CATS, cat, catOf, guessCategory, learnedCategory, registerCats, customCategory, applyCats, titleStarts, CURRENCIES, uid, today, fmt, parseAmount, allocate, baseAmount, shares,
+  CATS, cat, catOf, guessCategory, learnedCategory, registerCats, customCategory, applyCats, titleStarts, CURRENCIES, uid, today, fmt, parseAmount, groupAmount, allocate, baseAmount, shares,
   balances, settle, stats, debtMove, vocative, toIban, spayd, dateLabel, seed, nextDue, runRecurring,
 } from './logic.js';
 import {
@@ -473,6 +473,23 @@ function Balance({ cents, currency, zero }) {
   if (!cents) return zero ? html`<span class="muted">${zero}</span>` : html`<span class="pos">vyrovnáno ✓</span>`;
   return html`<span class=${cents > 0 ? 'recv' : 'neg'}>${cents > 0 ? '+' : '−'}${fmt(Math.abs(cents), currency)}</span>`;
 }
+
+// Částky v polích: tisíce oddělené tečkou (10.000), desetinná čárka. Kurzor zůstane, kde byl.
+const amountText = (cents) => groupAmount(String(cents / 100).replace('.', ','));
+const onAmount = (set) => (e) => {
+  const el = e.target;
+  let raw = el.value, at = el.selectionStart ?? raw.length;
+  // Právě napsaná tečka znamená desetinnou čárku; ostatní tečky jsou jen oddělovače tisíců.
+  if (e.data === '.' && at > 0 && raw[at - 1] === '.') raw = raw.slice(0, at - 1) + ',' + raw.slice(at);
+  const before = raw.slice(0, at).replace(/[\s.]/g, '').length;
+  // Při psaní jsou všechny zbylé tečky jen naše oddělovače; u vloženého textu to pozná groupAmount.
+  const v = groupAmount(e.inputType === 'insertFromPaste' ? raw : raw.replace(/\./g, ''));
+  set(v);
+  el.value = v;
+  let pos = 0;
+  for (let n = 0; pos < v.length && n < before; pos++) if (v[pos] !== '.') n++;
+  try { el.setSelectionRange(pos, pos); } catch {}
+};
 
 function Avatar({ m, size = 32 }) {
   const style = `width:${size}px;height:${size}px;font-size:${Math.round(size * 0.42)}px`;
@@ -1227,7 +1244,7 @@ function EntryForm({ group, entry, repeat, onSave, onDelete }) {
   };
   const [kind, setKind] = useState(init.kind);
   const [title, setTitle] = useState(init.title);
-  const [amountStr, setAmountStr] = useState(init.amount ? String(init.amount / 100).replace('.', ',') : '');
+  const [amountStr, setAmountStr] = useState(init.amount ? amountText(init.amount) : '');
   const [currency, setCurrency] = useState(init.currency);
   const [rateStr, setRateStr] = useState(String(init.rate).replace('.', ','));
   const [rateNote, setRateNote] = useState('');
@@ -1239,7 +1256,7 @@ function EntryForm({ group, entry, repeat, onSave, onDelete }) {
   const [parts, setParts] = useState(() =>
     Object.fromEntries(members.map((m) => {
       const v = init.kind !== 'transfer' ? init.parts[m.id] || 0 : 1;
-      return [m.id, init.mode === 'exact' ? (v ? String(v / 100).replace('.', ',') : '') : v];
+      return [m.id, init.mode === 'exact' ? (v ? amountText(v) : '') : v];
     })));
   const [to, setTo] = useState(
     init.kind === 'transfer' ? Object.keys(init.parts)[0] : members.find((m) => m.id !== init.paidBy)?.id);
@@ -1314,7 +1331,7 @@ function EntryForm({ group, entry, repeat, onSave, onDelete }) {
       ${!entry && html`<${Seg} value=${kind} onChange=${setKind} options=${[['expense', 'Výdaj'], ['income', 'Příjem'], ['transfer', 'Převod']]} />`}
 
       <div class="amount-row">
-        <input class="amount" inputmode="decimal" placeholder="0" value=${amountStr} onInput=${(e) => setAmountStr(e.target.value)} aria-label="Částka" />
+        <input class="amount" inputmode="decimal" placeholder="0" value=${amountStr} onInput=${onAmount(setAmountStr)} aria-label="Částka" />
         <div class="cur-pick"><${Select} label="Měna" value=${currency} onChange=${pickCurrency}
           options=${[...new Set([group.currency, ...CURRENCIES])].map((c) => [c, c])} /></div>
       </div>
@@ -1396,7 +1413,7 @@ function EntryForm({ group, entry, repeat, onSave, onDelete }) {
                 </span>`}
               ${mode === 'exact' && html`
                 <span class="grow who"><${Avatar} m=${m} size=${26} />${m.name}</span>
-                <input class="mini" inputmode="decimal" placeholder="0" value=${parts[m.id]} onInput=${(e) => setPart(m.id, e.target.value)} />`}
+                <input class="mini" inputmode="decimal" placeholder="0" value=${parts[m.id]} onInput=${onAmount((v) => setPart(m.id, v))} />`}
               ${mode !== 'exact' && html`<span class="share muted">${preview[m.id] ? fmt(preview[m.id], currency) : '—'}</span>`}
             </div>
           `)}
@@ -1612,7 +1629,7 @@ const PAY_VIA = { qr: 'QR platbou', bank: 'převodem', cash: 'hotově' };
 function PaySheet({ group, pay, onSave }) {
   const cur = group.currency;
   const from = nameOf(group, pay.from), to = nameOf(group, pay.to);
-  const asText = (c) => String(c / 100).replace('.', ',');
+  const asText = amountText;
   const [str, setStr] = useState(asText(pay.amount));
   const [via, setVia] = useState(pay.iban ? 'qr' : 'cash');
   const [date, setDate] = useState(today());
@@ -1643,7 +1660,7 @@ function PaySheet({ group, pay, onSave }) {
       <label class="field">
         <span>Kolik se teď platí</span>
         <div class="amount-row">
-          <input class="amount" inputmode="decimal" placeholder="0" value=${str} onInput=${(e) => setStr(e.target.value)} aria-label="Částka" />
+          <input class="amount" inputmode="decimal" placeholder="0" value=${str} onInput=${onAmount(setStr)} aria-label="Částka" />
           <span class="pay-cur">${cur}</span>
         </div>
       </label>

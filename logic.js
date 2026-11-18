@@ -142,6 +142,7 @@ export const today = () => {
   return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
 };
 
+// Tisíce oddělujeme tečkou (10.000 Kč), desetinná místa čárkou.
 export function fmt(cents, currency) {
   const whole = cents % 100 === 0;
   return new Intl.NumberFormat('cs-CZ', {
@@ -149,11 +150,22 @@ export function fmt(cents, currency) {
     currency,
     minimumFractionDigits: whole ? 0 : 2,
     maximumFractionDigits: whole ? 0 : 2,
-  }).format(cents / 100);
+  }).format(cents / 100).replace(/[\s\u00a0\u202f](?=\d)/g, '.');
+}
+
+// Text částky do pole: "10000,5" → "10.000,5". Tečky bere jako oddělovače tisíců, čárku jako desetinnou.
+export function groupAmount(v) {
+  let t = String(v).replace(/\s/g, '');
+  // Jediná tečka, za kterou nejsou přesně tři číslice, je desetinná (třeba vložené "2.5").
+  if (!t.includes(',') && /^\d*\.\d*$/.test(t) && !/^\d{1,3}\.\d{3}$/.test(t)) t = t.replace('.', ',');
+  t = t.replace(/\./g, '');
+  const i = t.indexOf(',');
+  const whole = (i < 0 ? t : t.slice(0, i)).replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+  return i < 0 ? whole : whole + ',' + t.slice(i + 1).replace(/,/g, '');
 }
 
 export function parseAmount(str) {
-  const n = parseFloat(String(str).replace(/\s/g, '').replace(',', '.'));
+  const n = parseFloat(groupAmount(str).replace(/\./g, '').replace(',', '.'));
   return Number.isFinite(n) && n > 0 ? Math.round(n * 100) : 0;
 }
 
