@@ -205,7 +205,28 @@ export function balances(group) {
     b[e.paidBy] = (b[e.paidBy] || 0) + sign * baseAmount(e);
     for (const id in s) b[id] = (b[id] || 0) - sign * s[id];
   }
-  return b;
+  return group.currency === 'CZK' ? wholeCrowns(b) : b;
+}
+
+// Koruny zaokrouhlíme na celé (haléři se neplatí): do 49 haléřů dolů, od 50 nahoru.
+// Součet musí zůstat nula, takže korunu, která zaokrouhlením vznikne nebo zmizí,
+// vrátíme tomu, komu zaokrouhlení pomohlo nejvíc. Pořadí je pevné (podle id), aby všude vyšlo totéž.
+export function wholeCrowns(bal) {
+  const ids = Object.keys(bal).sort();
+  const r = {};
+  let diff = 0;
+  for (const id of ids) {
+    r[id] = Math.round(bal[id] / 100) * 100;
+    diff += r[id];
+  }
+  const gain = (id) => r[id] - bal[id];
+  for (let n = 0; diff !== 0 && n < ids.length * 2; n++) {
+    const up = diff > 0;
+    const pick = ids.reduce((best, id) => (up ? gain(id) > gain(best) : gain(id) < gain(best)) ? id : best, ids[0]);
+    r[pick] += up ? -100 : 100;
+    diff += up ? -100 : 100;
+  }
+  return r;
 }
 
 // Navrhne co nejméně plateb: největší dlužník platí největšímu věřiteli.

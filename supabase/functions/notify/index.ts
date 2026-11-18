@@ -57,6 +57,20 @@ function settle(g: Group) {
     bal[e.paidBy] = (bal[e.paidBy] || 0) + sign * base;
     for (const id in s) bal[id] = (bal[id] || 0) - sign * s[id];
   }
+  // Koruny na celé, stejně jako v aplikaci (logic.js → wholeCrowns).
+  if ((g as { currency?: string }).currency === "CZK") {
+    const ids = Object.keys(bal).sort();
+    const raw = { ...bal };
+    let diff = 0;
+    for (const id of ids) { bal[id] = Math.round(raw[id] / 100) * 100; diff += bal[id]; }
+    const gain = (id: string) => bal[id] - raw[id];
+    for (let n = 0; diff !== 0 && n < ids.length * 2; n++) {
+      const up = diff > 0;
+      const pick = ids.reduce((best, id) => (up ? gain(id) > gain(best) : gain(id) < gain(best)) ? id : best, ids[0]);
+      bal[pick] += up ? -100 : 100;
+      diff += up ? -100 : 100;
+    }
+  }
   const debt: { id: string; v: number }[] = [], cred: { id: string; v: number }[] = [];
   for (const id in bal) {
     if (bal[id] < 0) debt.push({ id, v: -bal[id] });
