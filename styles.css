@@ -151,6 +151,7 @@ input:focus-visible, select:focus-visible, button:focus-visible { outline: 2px s
 .check { display: flex; align-items: center; gap: 10px; cursor: pointer; }
 .check input, .me-pick input { width: 20px; height: 20px; accent-color: var(--accent); }
 .split .item { padding: 10px 14px; min-height: 52px; }
+.split .who { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .share { width: 92px; text-align: right; }
 .stepper { display: flex; align-items: center; gap: 4px; }
 .stepper button { width: 32px; height: 32px; border-radius: 50%; background: var(--line); text-align: center; font-size: 18px; }

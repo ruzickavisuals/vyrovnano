@@ -1385,17 +1385,17 @@ function EntryForm({ group, entry, repeat, onSave, onDelete }) {
               ${mode === 'equal' && html`
                 <label class="check grow">
                   <input type="checkbox" checked=${!!parts[m.id]} onChange=${(e) => setPart(m.id, e.target.checked ? 1 : 0)} />
-                  <span>${m.name}</span>
+                  <span class="who"><${Avatar} m=${m} size=${26} />${m.name}</span>
                 </label>`}
               ${mode === 'shares' && html`
-                <span class="grow">${m.name}</span>
+                <span class="grow who"><${Avatar} m=${m} size=${26} />${m.name}</span>
                 <span class="stepper">
                   <button type="button" onClick=${() => setPart(m.id, Math.max(0, (Number(parts[m.id]) || 0) - 1))}>−</button>
                   <b>${Number(parts[m.id]) || 0}×</b>
                   <button type="button" onClick=${() => setPart(m.id, (Number(parts[m.id]) || 0) + 1)}>+</button>
                 </span>`}
               ${mode === 'exact' && html`
-                <span class="grow">${m.name}</span>
+                <span class="grow who"><${Avatar} m=${m} size=${26} />${m.name}</span>
                 <input class="mini" inputmode="decimal" placeholder="0" value=${parts[m.id]} onInput=${(e) => setPart(m.id, e.target.value)} />`}
               ${mode !== 'exact' && html`<span class="share muted">${preview[m.id] ? fmt(preview[m.id], currency) : '—'}</span>`}
             </div>
