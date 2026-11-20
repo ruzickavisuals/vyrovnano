@@ -925,3 +925,25 @@ button:disabled .hx { display: none; }
 .mbar.on .mbar-col i { background: var(--accent); }
 .mbar small { font-size: 10px; }
 .st-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Řádek záznamu: proužek vlevo podle dopadu na mě, nahoře co a kolik, dole kdo → za koho */
+.item.ent { display: flex; flex-direction: column; align-items: stretch; gap: 7px; padding: 11px 14px 11px 16px; text-align: left; box-shadow: inset 3px 0 0 var(--line); }
+.item.ent.in { box-shadow: inset 3px 0 0 var(--recv); }
+.item.ent.out { box-shadow: inset 3px 0 0 var(--neg); }
+.ent-top, .ent-bot { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.ent-top { align-items: baseline; }
+.ent-emo { font-size: 15px; flex-shrink: 0; align-self: center; }
+.ent-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.ent-total { flex-shrink: 0; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ent-bot { font-size: 13px; }
+.ent-bot .ava { flex-shrink: 0; }
+.ent-arrow { position: relative; width: 12px; height: 8px; flex-shrink: 0; color: var(--muted); }
+.ent-arrow::before { content: ''; position: absolute; left: 0; right: 1px; top: 50%; height: 1.5px; margin-top: -0.75px; background: currentColor; border-radius: 1px; }
+.ent-arrow::after { content: ''; position: absolute; right: 1px; top: 50%; width: 5px; height: 5px; border-top: 1.5px solid currentColor; border-right: 1.5px solid currentColor; transform: translateY(-50%) rotate(45deg); }
+.ent-stack { display: inline-flex; align-items: center; flex-shrink: 0; }
+.ent-stack .ava + .ava, .ent-stack .ava + .ent-more { margin-left: -6px; }
+.ent-stack .ava { box-shadow: 0 0 0 2px var(--card); }
+.ent-more { position: relative; display: inline-flex; align-items: center; justify-content: center; height: 20px; min-width: 20px; padding: 0 5px; border-radius: 10px; background: var(--line); box-shadow: 0 0 0 2px var(--card); font-size: 10px; font-weight: 700; color: var(--muted); }
+.ent-note { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+.ent-mine { margin-left: auto; flex-shrink: 0; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; padding-left: 6px; }
+.ent-mine .muted { font-weight: 400; font-size: 12px; }

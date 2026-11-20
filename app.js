@@ -916,46 +916,55 @@ function GroupView({ group, onBack, onEdit, onShare, onEntry, onAdd, onPay, onQr
 }
 
 // Jeden řádek záznamu (výdaj, příjem nebo převod). Používá ho krátký seznam ve skupině i okno „Všechny záznamy“.
+// Nahoře ikonka kategorie, název a celková částka; dole kdo platil → za koho a co to znamená pro mě.
+// Barevný proužek vlevo říká totéž na první pohled: zelená = dostanu, červená = dlužím, šedá = netýká se mě.
 function EntryRow({ group, e, onEntry, onDelete, showDate }) {
   const cur = group.currency;
   const base = baseAmount(e);
-  const when = showDate ? html`<span class="muted"> · ${dateLabel(e.date)}</span>` : '';
-  if (e.kind === 'transfer') {
+  const member = (id) => group.members.find((m) => m.id === id) || { id, name: '?' };
+  const transfer = e.kind === 'transfer';
+  const inc = e.kind === 'income';
+  let mine, emoji, title, total, tag = null, forWho;
+  if (transfer) {
     const to = Object.keys(e.parts)[0];
     // Dopad na můj zůstatek: kdo platí, tomu zůstatek roste; příjemci klesá.
-    const mineT = e.paidBy === group.me ? base : to === group.me ? -base : 0;
+    mine = e.paidBy === group.me ? base : to === group.me ? -base : 0;
     // Převedený dluh z jiné skupiny čteme jako „dlužník dluží věřiteli“, ne jako platbu.
     const moved = e.mvd === 'in';
     const paid = !e.mv && (!e.title || e.title === 'Převod' || /vyrovn|uhra[zd]/i.test(e.title));
-    return html`
-      <${SwipeRow} onDelete=${() => onDelete(e)} onEdit=${() => onEntry(e)}>
-      <button class="item" onClick=${() => onEntry(e)}>
-        <span class="avatar sm">${e.mv ? '🔀' : '💱'}</span>
-        <span class="grow">
-          <strong>${moved ? `${nameOf(group, to)} dluží ${nameOf(group, e.paidBy)}` : `${nameOf(group, e.paidBy)} → ${nameOf(group, to)}`}</strong>
-          <small>${paid ? html`<span class="paid-tag">${/^Uhrazeno \S/.test(e.title) ? e.title.toLowerCase() : 'uhrazeno'}</span>` : html`<span class="muted">${e.title}</span>`}${when}</small>
-        </span>
-        <span class="right">
-          <strong>${fmt(e.amount, e.currency)}</strong>
-          <small><${Balance} cents=${mineT} currency=${cur} zero="netýká se tě" /></small>
-        </span>
-      </button>
-      <//>
-    `;
+    emoji = e.mv ? '🔀' : '💱';
+    title = moved ? `${nameOf(group, to)} dluží ${nameOf(group, e.paidBy)}` : `${nameOf(group, e.paidBy)} → ${nameOf(group, to)}`;
+    total = fmt(e.amount, e.currency);
+    tag = paid ? html`<span class="paid-tag">${/^Uhrazeno \S/.test(e.title) ? e.title.toLowerCase() : 'uhrazeno'}</span>` : e.title ? html`<span class="muted ent-note">${e.title}</span>` : null;
+    forWho = [to];
+  } else {
+    const sh = shares(e);
+    mine = (inc ? -1 : 1) * ((e.paidBy === group.me ? base : 0) - (sh[group.me] || 0));
+    emoji = inc && catOf(e) === 'other' ? '💰' : cat(catOf(e)).e;
+    title = e.title;
+    total = (inc ? '+' : '') + fmt(base, cur);
+    forWho = group.members.map((m) => m.id).filter((id) => sh[id] > 0);
+    if (inc) tag = html`<span class="muted ent-note">příjem</span>`;
   }
-  const inc = e.kind === 'income';
-  const mine = (inc ? -1 : 1) * ((e.paidBy === group.me ? base : 0) - (shares(e)[group.me] || 0));
+  const extra = [e.currency !== cur && !transfer ? fmt(e.amount, e.currency) : '', showDate ? dateLabel(e.date) : ''].filter(Boolean).join(' · ');
   return html`
     <${SwipeRow} onDelete=${() => onDelete(e)} onEdit=${() => onEntry(e)}>
-    <button class="item" onClick=${() => onEntry(e)}>
-      <span class="avatar sm">${inc && catOf(e) === 'other' ? '💰' : cat(catOf(e)).e}</span>
-      <span class="grow">
-        <strong>${e.title}</strong>
-        <small class="muted">${inc ? 'příjem · přijal(a)' : 'platil(a)'} ${nameOf(group, e.paidBy)}${e.currency !== cur ? ` · ${fmt(e.amount, e.currency)}` : ''}${when}</small>
+    <button class=${'item ent ' + (mine > 0 ? 'in' : mine < 0 ? 'out' : 'off')} onClick=${() => onEntry(e)}>
+      <span class="ent-top">
+        <span class="ent-emo">${emoji}</span>
+        <strong class="ent-title">${title}</strong>
+        <strong class="ent-total">${total}</strong>
       </span>
-      <span class="right">
-        <strong>${inc ? '+' : ''}${fmt(base, cur)}</strong>
-        <small><${Balance} cents=${mine} currency=${cur} zero="netýká se tě" /></small>
+      <span class="ent-bot">
+        <${Avatar} m=${member(e.paidBy)} size=${24} />
+        <span class="ent-arrow" aria-label=${inc ? 'přijal(a) za' : transfer ? 'komu' : 'platil(a) za'}></span>
+        <span class="ent-stack">
+          ${forWho.slice(0, 5).map((id) => html`<${Avatar} key=${id} m=${member(id)} size=${20} />`)}
+          ${forWho.length > 5 && html`<span class="ent-more">+${forWho.length - 5}</span>`}
+        </span>
+        ${tag}
+        ${extra && html`<span class="muted ent-note">${extra}</span>`}
+        <span class="ent-mine"><${Balance} cents=${mine} currency=${cur} zero="bez tebe" /></span>
       </span>
     </button>
     <//>
