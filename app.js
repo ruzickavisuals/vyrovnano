@@ -1200,29 +1200,122 @@ function Debts({ group, bal, onPay, onQr, onMove }) {
   `;
 }
 
-function Stats({ group, st }) {
+// Barvy výsečí grafu; co se nevejde, je šedé.
+const PIE = ['#2dd4bf', '#60a5fa', '#f59e0b', '#f472b6', '#a78bfa', '#34d399', '#fb7185', '#38bdf8', '#facc15', '#c084fc'];
+const MON3 = ['led', 'úno', 'bře', 'dub', 'kvě', 'čvn', 'čvc', 'srp', 'zář', 'říj', 'lis', 'pro'];
+const monthName = (ym) => `${MON3[Number(ym.slice(5)) - 1]} ${ym.slice(0, 4)}`;
+
+function Stats({ group }) {
   const cur = group.currency;
-  if (!st.total) return html`<div class="empty"><div class="big">📊</div><p>Přehled se objeví po prvním výdaji.</p></div>`;
-  const cats = Object.entries(st.byCat).sort((a, b) => b[1] - a[1]);
-  const maxP = Math.max(1, ...group.members.map((m) => Math.max(st.consumed[m.id] || 0, st.paid[m.id] || 0)));
+  const [kind, setKind] = useState('expense');
+  const [period, setPeriod] = useState('all');
+  const [who, setWho] = useState('');
+  const [catSel, setCatSel] = useState('');
+  const now = today();
+  const shift = (n) => { const d = new Date(Number(now.slice(0, 4)), Number(now.slice(5, 7)) - 1 + n, 1); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; };
+  const PERIODS = [['all', 'Vše'], [shift(0), 'Tento měsíc'], [shift(-1), 'Minulý měsíc'], [now.slice(0, 4), 'Letos'], [String(Number(now.slice(0, 4)) - 1), 'Loni']];
+  const data = useMemo(() => {
+    // Částka záznamu z pohledu filtru: celá, nebo jen podíl vybraného člověka.
+    const rows = [];
+    for (const e of group.entries) {
+      if (e.kind !== kind) continue;
+      const v = who ? shares(e)[who] || 0 : baseAmount(e);
+      if (v > 0) rows.push({ e, v, c: catOf(e), ym: String(e.date || '').slice(0, 7) });
+    }
+    const inPeriod = rows.filter((r) => period === 'all' || r.ym.startsWith(period));
+    const byCat = {};
+    for (const r of inPeriod) byCat[r.c] = (byCat[r.c] || 0) + r.v;
+    const cats = Object.entries(byCat).sort((a, b) => b[1] - a[1]);
+    const shown = inPeriod.filter((r) => !catSel || r.c === catSel);
+    const total = shown.reduce((t, r) => t + r.v, 0);
+    const paid = {};
+    for (const r of shown) paid[r.e.paidBy] = (paid[r.e.paidBy] || 0) + baseAmount(r.e);
+    const consumed = {};
+    for (const r of shown) { const sh = shares(r.e); for (const id in sh) consumed[id] = (consumed[id] || 0) + sh[id]; }
+    // Posledních 12 měsíců; období se sem nepočítá, aby šlo měsíce porovnat.
+    const months = Array.from({ length: 12 }, (_, i) => ({ ym: shift(i - 11), v: 0 }));
+    for (const r of rows) { if (catSel && r.c !== catSel) continue; const m = months.find((x) => x.ym === r.ym); if (m) m.v += r.v; }
+    const top = [...shown].sort((a, b) => b.v - a.v).slice(0, 5);
+    return { cats, catTotal: inPeriod.reduce((t, r) => t + r.v, 0), shown, total, paid, consumed, months, top, any: rows.length > 0 };
+  }, [group, kind, period, who, catSel]);
+  if (!group.entries.some((e) => e.kind !== 'transfer')) return html`<div class="empty"><div class="big">📊</div><p>Přehled se objeví po prvním výdaji.</p></div>`;
+  const { cats, catTotal, shown, total, paid, consumed, months, top } = data;
+  const maxM = Math.max(1, ...months.map((m) => m.v));
+  const maxP = Math.max(1, ...group.members.map((m) => Math.max(consumed[m.id] || 0, paid[m.id] || 0)));
+  const colorOf = (i) => PIE[i] || '#5b6472';
+  let off = 0;
+  const periodLabel = PERIODS.find((p) => p[0] === period)?.[1] || monthName(period);
+  const word = kind === 'income' ? 'příjmy' : 'výdaje';
   return html`
     <h2 class="panel-title">Přehled</h2>
-    <h3 class="day">Za co se utrácelo</h3>
-    <div class="card pad">
-      ${cats.map(([id, v]) => html`
-        <div class="stat-row">
-          <div class="row"><span class="grow">${cat(id).e} ${cat(id).n}</span><strong>${fmt(v, cur)}</strong><small class="muted pct">${Math.round((v / st.total) * 100)} %</small></div>
-          <div class="track"><i style=${`width:${(v / st.total) * 100}%`}></i></div>
-        </div>
-      `)}
+    <${Seg} value=${kind} onChange=${(v) => { setKind(v); setCatSel(''); }} options=${[['expense', 'Výdaje'], ['income', 'Příjmy']]} />
+    <div class="chips st-filter">
+      ${PERIODS.map(([id, n]) => html`<button class=${'chip' + (period === id ? ' on' : '')} onClick=${() => setPeriod(id)}>${n}</button>`)}
+      ${!PERIODS.some((p) => p[0] === period) && html`<button class="chip on" onClick=${() => setPeriod('all')}>${monthName(period)} ✕</button>`}
     </div>
+    <div class="chips st-filter">
+      <button class=${'chip' + (!who ? ' on' : '')} onClick=${() => setWho('')}>Celá skupina</button>
+      ${group.members.map((m) => html`<button class=${'chip' + (who === m.id ? ' on' : '')} onClick=${() => setWho(m.id)}><${Avatar} m=${m} size=${20} /><span>${m.name}</span></button>`)}
+    </div>
+    ${who && html`<p class="hint">Počítá se jen podíl, který z plateb připadá na: ${nameOf(group, who)}.</p>`}
+
+    <div class="st-tiles">
+      <div class="card pad"><small class="muted">${catSel ? cat(catSel).n : 'Celkem'} · ${periodLabel}</small><strong>${fmt(total, cur)}</strong></div>
+      <div class="card pad"><small class="muted">Počet plateb</small><strong>${shown.length}</strong></div>
+      <div class="card pad"><small class="muted">Průměrná platba</small><strong>${fmt(shown.length ? Math.round(total / shown.length / 100) * 100 : 0, cur)}</strong></div>
+      <div class="card pad"><small class="muted">Největší platba</small><strong>${fmt(top[0]?.v || 0, cur)}</strong></div>
+    </div>
+
+    <h3 class="day">Podle kategorií</h3>
+    ${cats.length === 0 ? html`<div class="card pad center muted">Pro tenhle výběr tu nejsou žádné ${word}.</div>` : html`
+      <div class="card pad">
+        <div class="donut">
+          <svg viewBox="0 0 42 42" role="img" aria-label="Rozdělení podle kategorií">
+            <circle cx="21" cy="21" r="15.9155" fill="none" stroke="var(--line)" stroke-width="5" />
+            ${cats.map(([id, v], i) => {
+              const p = (v / catTotal) * 100, o = off;
+              off += p;
+              return html`<circle cx="21" cy="21" r="15.9155" fill="none" stroke=${colorOf(i)} stroke-width=${catSel === id ? 6.5 : 5}
+                opacity=${catSel && catSel !== id ? 0.25 : 1} stroke-dasharray=${`${Math.max(p - 0.6, 0.2)} ${100 - Math.max(p - 0.6, 0.2)}`} stroke-dashoffset=${25 - o}
+                onClick=${() => setCatSel(catSel === id ? '' : id)} />`;
+            })}
+          </svg>
+          <div class="donut-mid"><small class="muted">${catSel ? cat(catSel).n : 'Celkem'}</small><strong>${fmt(Math.round(total / 100) * 100, cur)}</strong></div>
+        </div>
+        ${cats.map(([id, v], i) => html`
+          <button class=${'stat-row cat-row' + (catSel === id ? ' on' : '')} onClick=${() => setCatSel(catSel === id ? '' : id)}>
+            <div class="row"><i class="dot" style=${`background:${colorOf(i)}`}></i><span class="grow">${cat(id).e} ${cat(id).n}</span><strong>${fmt(v, cur)}</strong><small class="muted pct">${Math.round((v / catTotal) * 100)} %</small></div>
+          </button>
+        `)}
+        <small class="muted">Ťukni na kategorii a všechno ostatní na stránce se přepočítá jen pro ni.</small>
+      </div>`}
+
+    <h3 class="day">Po měsících${catSel ? ` · ${cat(catSel).n}` : ''}</h3>
+    <div class="card pad">
+      <div class="mbars">
+        ${months.map((m) => html`
+          <button class=${'mbar' + (period === m.ym ? ' on' : '')} onClick=${() => setPeriod(period === m.ym ? 'all' : m.ym)} aria-label=${`${monthName(m.ym)}: ${fmt(m.v, cur)}`}>
+            <span class="mbar-col"><i style=${`height:${m.v ? Math.max(3, (m.v / maxM) * 100) : 0}%`}></i></span>
+            <small>${MON3[Number(m.ym.slice(5)) - 1]}</small>
+          </button>`)}
+      </div>
+      <small class="muted">Nejvíc: ${fmt(maxM > 1 ? maxM : 0, cur)}. Ťukni na měsíc a uvidíš jen ten.</small>
+    </div>
+
+    ${top.length > 0 && html`
+      <h3 class="day">Největší ${word}</h3>
+      <div class="card pad">
+        ${top.map((r) => html`
+          <div class="stat-row"><div class="row"><span>${cat(r.c).e}</span><span class="grow st-title">${r.e.title || cat(r.c).n}<small class="muted"> · ${dateLabel(r.e.date)}</small></span><strong>${fmt(r.v, cur)}</strong></div></div>`)}
+      </div>`}
+
     <h3 class="day">Kdo kolik</h3>
     <div class="card pad">
-      ${group.members.map((m) => html`
+      ${group.members.filter((m) => !m.inactive || paid[m.id] || consumed[m.id]).map((m) => html`
         <div class="stat-row">
           <div class="row"><${Avatar} m=${m} size=${26} /><strong class="grow">${m.name}${m.inactive ? html` <em class="tag off">neaktivní</em>` : ''}</strong></div>
-          <div class="row sub"><span class="lbl">zaplatil(a)</span><div class="track grow"><i class="alt" style=${`width:${((st.paid[m.id] || 0) / maxP) * 100}%`}></i></div><span class="num">${fmt(st.paid[m.id] || 0, cur)}</span></div>
-          <div class="row sub"><span class="lbl">podíl na útratě</span><div class="track grow"><i style=${`width:${((st.consumed[m.id] || 0) / maxP) * 100}%`}></i></div><span class="num">${fmt(st.consumed[m.id] || 0, cur)}</span></div>
+          <div class="row sub"><span class="lbl">${kind === 'income' ? 'přijal(a)' : 'zaplatil(a)'}</span><div class="track grow"><i class="alt" style=${`width:${((paid[m.id] || 0) / maxP) * 100}%`}></i></div><span class="num">${fmt(paid[m.id] || 0, cur)}</span></div>
+          <div class="row sub"><span class="lbl">${kind === 'income' ? 'podíl na příjmu' : 'podíl na útratě'}</span><div class="track grow"><i style=${`width:${((consumed[m.id] || 0) / maxP) * 100}%`}></i></div><span class="num">${fmt(consumed[m.id] || 0, cur)}</span></div>
         </div>
       `)}
     </div>
@@ -1239,7 +1332,7 @@ function EntryForm({ group, entry, repeat, onSave, onDelete }) {
   const members = group.members.filter((m) => !m.inactive || (entry && (entry.paidBy === m.id || m.id in entry.parts)));
   const init = entry || {
     kind: 'expense', title: '', amount: 0, currency: group.currency, rate: 1,
-    paidBy: group.me, mode: 'equal', category: 'food', date: today(),
+    paidBy: group.me, mode: 'equal', category: 'other', date: today(),
     parts: Object.fromEntries(members.map((m) => [m.id, 1])),
   };
   const [kind, setKind] = useState(init.kind);
@@ -1273,7 +1366,7 @@ function EntryForm({ group, entry, repeat, onSave, onDelete }) {
   function typeTitle(v) {
     setTitle(v);
     const g = customCategory(group, v) || learnedCategory(group.entries, v) || guessCategory(v);
-    if (!catTouched && g !== 'other') setCategory(g);
+    if (!catTouched) setCategory(g); // co nepoznáme, jde do Ostatní
   }
   const amount = parseAmount(amountStr);
   const rate = currency === group.currency ? 1 : parseFloat(rateStr.replace(',', '.')) || 0;

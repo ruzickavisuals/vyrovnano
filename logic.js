@@ -40,7 +40,7 @@ const RULES = [
   ['food', 'restaur|obed|vecer|snidan|pizz|burger|sushi|poke|wolt|foodora|jidl|bistro|kebab|vietnam|pho\\b|asie|mexik|mechik|salsa|saigon|palacink|wafl|chalk|mcdonald|kfc|ramen|japchae|svacin|zmrzlin|dort|food|baget|polevk|gril'],
   ['home', 'ubytov|accommod|airbnb|booking|hotel|chat[auye]\\b|chalup|apartm|hostel|kemp'],
   ['household', 'uterk|pytl|mydl|houbic|sanytol|cistic|praci|toalet|airwick|vune|osvezov|uklid|uklizec|tepovan|kuchyn|prkynk|nuz\\b|pribor|talir|misk|sklenic|vidlic|filtr|odpad|drogeri|ubrousk|zarovk|led\\b'],
-  ['gear', 'regal|router|kamer|microsd|sd kart|zebrik|pohovk|gauc|vysavac|stativ|slider|box|hub\\b|usb|kabel|platn|sten[ay]\\b|bauhaus|hornbach|obi\\b|penetrac|vymalb|barv|kotv|narad|nabyt|stul\\b|zidl|monitor|ps5|konzol|desk[ay]\\b|ikea'],
+  ['gear', 'batoh|brasn|kufr|regal|router|kamer|microsd|sd kart|zebrik|pohovk|gauc|vysavac|stativ|slider|box|hub\\b|usb|kabel|platn|sten[ay]\\b|bauhaus|hornbach|obi\\b|penetrac|vymalb|barv|kotv|narad|nabyt|stul\\b|zidl|monitor|ps5|konzol|desk[ay]\\b|ikea'],
 ].map(([id, words]) => [id, new RegExp('\\b(?:' + words + ')')]);
 
 export function guessCategory(text) {

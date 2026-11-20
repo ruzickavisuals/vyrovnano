@@ -902,3 +902,26 @@ button:disabled .hx { display: none; }
 .pay-arrow { position: relative; width: 14px; height: 10px; flex-shrink: 0; }
 .pay-arrow::before { content: ''; position: absolute; left: 0; right: 1px; top: 50%; height: 2px; margin-top: -1px; border-radius: 1px; background: var(--neg); }
 .pay-arrow::after { content: ''; position: absolute; right: 1px; top: 50%; width: 6px; height: 6px; border-top: 2px solid var(--neg); border-right: 2px solid var(--neg); transform: translateY(-50%) rotate(45deg); }
+
+/* Přehled: filtry, dlaždice, koláč a měsíce */
+.st-filter { margin-top: 10px; }
+.st-filter .chip { display: inline-flex; align-items: center; gap: 6px; }
+.st-tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 14px; }
+.st-tiles .card { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.st-tiles strong { font-size: 19px; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.donut { position: relative; width: min(220px, 62%); margin: 4px auto 14px; }
+.donut svg { display: block; width: 100%; transform: rotate(0deg); }
+.donut circle { transition: opacity 0.2s, stroke-width 0.2s; cursor: pointer; }
+.donut-mid { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; pointer-events: none; text-align: center; padding: 0 22%; }
+.donut-mid strong { font-size: 17px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.cat-row { display: block; width: 100%; text-align: left; color: inherit; border-radius: 10px; }
+.cat-row.on { background: var(--accent-soft); margin: 0 -8px; padding-left: 8px; padding-right: 8px; width: calc(100% + 16px); }
+.dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+.mbars { display: flex; align-items: flex-end; gap: 4px; height: 150px; margin-bottom: 8px; }
+.mbar { flex: 1; min-width: 0; height: 100%; display: flex; flex-direction: column; align-items: center; gap: 4px; color: var(--muted); }
+.mbar-col { flex: 1; width: 100%; display: flex; align-items: flex-end; }
+.mbar-col i { display: block; width: 100%; border-radius: 5px 5px 2px 2px; background: color-mix(in srgb, var(--accent) 45%, var(--card)); transition: height 0.3s var(--ease); }
+.mbar.on { color: var(--text); font-weight: 700; }
+.mbar.on .mbar-col i { background: var(--accent); }
+.mbar small { font-size: 10px; }
+.st-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
