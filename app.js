@@ -932,10 +932,10 @@ function EntryRow({ group, e, onEntry, onDelete, showDate }) {
     // Převedený dluh z jiné skupiny čteme jako „dlužník dluží věřiteli“, ne jako platbu.
     const moved = e.mvd === 'in';
     const paid = !e.mv && (!e.title || e.title === 'Převod' || /vyrovn|uhra[zd]/i.test(e.title));
-    emoji = e.mv ? '🔀' : '💱';
+    emoji = e.mv ? '🔀' : '🤝';
     title = moved ? `${nameOf(group, to)} dluží ${nameOf(group, e.paidBy)}` : `${nameOf(group, e.paidBy)} → ${nameOf(group, to)}`;
     total = fmt(e.amount, e.currency);
-    tag = paid ? html`<span class="paid-tag">${/^Uhrazeno \S/.test(e.title) ? e.title.toLowerCase() : 'uhrazeno'}</span>` : e.title ? html`<span class="muted ent-note">${e.title}</span>` : null;
+    tag = paid ? html`<span class="ent-paid">✓ ${/^Uhrazeno \S/.test(e.title) ? 'u' + e.title.slice(1) : 'uhrazeno'}</span>` : e.title ? html`<span class="muted ent-note">${e.title}</span>` : null;
     forWho = [to];
   } else {
     const sh = shares(e);
@@ -956,15 +956,16 @@ function EntryRow({ group, e, onEntry, onDelete, showDate }) {
         <strong class="ent-total">${total}</strong>
       </span>
       <span class="ent-bot">
-        <${Avatar} m=${member(e.paidBy)} size=${24} />
-        <span class="ent-arrow" aria-label=${inc ? 'přijal(a) za' : transfer ? 'komu' : 'platil(a) za'}></span>
-        <span class="ent-stack">
-          ${forWho.slice(0, 5).map((id) => html`<${Avatar} key=${id} m=${member(id)} size=${20} />`)}
-          ${forWho.length > 5 && html`<span class="ent-more">+${forWho.length - 5}</span>`}
-        </span>
+        ${!transfer && html`
+          <${Avatar} m=${member(e.paidBy)} size=${20} />
+          <span class="ent-arrow" aria-label=${inc ? 'přijal(a) za' : 'platil(a) za'}></span>
+          <span class="ent-stack">
+            ${forWho.slice(0, 5).map((id) => html`<${Avatar} key=${id} m=${member(id)} size=${20} />`)}
+            ${forWho.length > 5 && html`<span class="ent-more">+${forWho.length - 5}</span>`}
+          </span>`}
         ${tag}
         ${extra && html`<span class="muted ent-note">${extra}</span>`}
-        <span class="ent-mine"><${Balance} cents=${mine} currency=${cur} zero="bez tebe" /></span>
+        ${mine !== 0 && html`<span class="ent-mine"><${Balance} cents=${mine} currency=${cur} /></span>`}
       </span>
     </button>
     <//>
@@ -1993,7 +1994,7 @@ function SearchSheet({ groups, scopeName, onOpen }) {
     const count = {};
     for (const it of index) if (it.e.kind === 'expense') { const c = catOf(it.e); if (c !== 'other') count[c] = (count[c] || 0) + 1; }
     const cats = Object.keys(count).sort((a, b) => count[b] - count[a]).slice(0, 5).map((id) => [`${cat(id).e} ${cat(id).n}`, cat(id).n]);
-    return [...cats, ['💰 Příjmy', 'příjem'], ['💱 Převody', 'převod'], ['Nad 1 000', '>1000'], [String(new Date().getFullYear()), String(new Date().getFullYear())]];
+    return [...cats, ['💰 Příjmy', 'příjem'], ['🤝 Převody', 'převod'], ['Nad 1 000', '>1000'], [String(new Date().getFullYear()), String(new Date().getFullYear())]];
   }, [index]);
 
   return html`
@@ -2028,7 +2029,7 @@ function SearchSheet({ groups, scopeName, onOpen }) {
             const sub = e.kind === 'transfer' ? e.title : `${e.kind === 'income' ? 'přijal(a)' : 'platil(a)'} ${nameOf(g, e.paidBy)}`;
             return html`
               <button class="item" onClick=${() => onOpen(g.id, e)}>
-                <span class="avatar sm">${e.kind === 'transfer' ? (e.mv ? '🔀' : '💱') : e.kind === 'income' && catOf(e) === 'other' ? '💰' : cat(catOf(e)).e}</span>
+                <span class="avatar sm">${e.kind === 'transfer' ? (e.mv ? '🔀' : '🤝') : e.kind === 'income' && catOf(e) === 'other' ? '💰' : cat(catOf(e)).e}</span>
                 <span class="grow">
                   <strong><${Marked} text=${title} tokens=${tokens} /></strong>
                   <small class="muted"><${Marked} text=${`${dateLabel(e.date)} · ${sub}${many ? ` · ${g.name}` : ''}`} tokens=${tokens} /></small>
