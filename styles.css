@@ -952,3 +952,13 @@ button:disabled .hx { display: none; }
 .ent-paid { font-size: 12px; font-weight: 600; color: var(--pos); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .ent-bot { min-height: 20px; }
 .ent-bot .ava { opacity: 0.92; }
+
+/* Lišta „Je tu nová verze“ nad spodní nabídkou */
+.update-bar { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(env(safe-area-inset-bottom, 0px) + 104px); z-index: 250;
+  display: flex; align-items: center; gap: 10px; max-width: calc(100vw - 24px); padding: 8px 8px 8px 16px; border-radius: 999px;
+  background: var(--card); border: 1px solid var(--accent); box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45); font-weight: 600; font-size: 14px; white-space: nowrap;
+  animation: update-in 0.35s var(--ease, ease) both; }
+.update-bar button { padding: 8px 14px; border-radius: 999px; background: var(--accent); color: var(--on-accent); font-weight: 700; font-size: 14px; }
+.update-bar .update-later { background: transparent; color: var(--muted); padding: 8px 10px; font-weight: 400; }
+@keyframes update-in { from { opacity: 0; transform: translate(-50%, 16px); } to { opacity: 1; transform: translate(-50%, 0); } }
+@media (min-width: 900px) { .update-bar { bottom: 24px; } }

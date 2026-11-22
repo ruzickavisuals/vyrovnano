@@ -3611,10 +3611,10 @@ if ('serviceWorker' in navigator && !['localhost', '127.0.0.1'].includes(locatio
   let touched = false;
   let pending = false;
   for (const t of ['pointerdown', 'keydown']) addEventListener(t, () => { touched = true; }, { capture: true, passive: true });
-  const applyUpdate = () => {
+  const applyUpdate = (force) => {
     try {
-      // Pojistka proti opakovanému načítání dokola: nejvýš jednou za minutu.
-      if (Date.now() - Number(sessionStorage.getItem('vyrovnano.updated') || 0) < 60000) return;
+      // Pojistka proti opakovanému načítání dokola: nejvýš jednou za minutu (ťuknutí na tlačítko platí vždy).
+      if (!force && Date.now() - Number(sessionStorage.getItem('vyrovnano.updated') || 0) < 60000) return;
       sessionStorage.setItem('vyrovnano.updated', String(Date.now()));
       sessionStorage.setItem('vyrovnano.skipIntro', '1');
     } catch {}
@@ -3623,15 +3623,43 @@ if ('serviceWorker' in navigator && !['localhost', '127.0.0.1'].includes(locatio
   navigator.serviceWorker.addEventListener('message', (e) => {
     if (e.data?.type !== 'updated') return;
     if (!touched && Date.now() - freshSince < 10000 && !document.querySelector('.sheet, .dialog')) applyUpdate();
-    else pending = true;
+    else { pending = true; showUpdateBar(); }
   });
+  // Když se nejde přepnout potichu (člověk zrovna něco dělá), nabídneme to lištou s tlačítkem.
+  // Nic se neztratí: skupiny jsou uložené v zařízení; rozepsaný formulář si ale člověk má nejdřív dopsat.
+  function showUpdateBar() {
+    if (document.querySelector('.update-bar')) return;
+    const bar = document.createElement('div');
+    bar.className = 'update-bar';
+    bar.setAttribute('role', 'status');
+    const text = document.createElement('span');
+    text.textContent = '✨ Je tu nová verze';
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.textContent = 'Obnovit';
+    btn.onclick = () => { btn.disabled = true; btn.textContent = 'Načítám…'; applyUpdate(true); };
+    const later = document.createElement('button');
+    later.type = 'button';
+    later.className = 'update-later';
+    later.setAttribute('aria-label', 'Později');
+    later.textContent = '✕';
+    later.onclick = () => bar.remove(); // přepne se samo při příštím návratu do aplikace
+    bar.append(text, btn, later);
+    document.body.append(bar);
+  }
+  // Otevřená aplikace se sama ptá na novou verzi každých pět minut, nejen při návratu z pozadí.
+  setInterval(() => {
+    if (document.visibilityState !== 'visible' || pending) return;
+    checkedAt = Date.now();
+    navigator.serviceWorker.controller?.postMessage({ type: 'check' });
+  }, 300000);
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState !== 'visible') return;
     if (pending && !document.querySelector('.sheet, .dialog')) return applyUpdate();
-    // Telefon aplikaci často jen uspí. Při návratu se proto zeptáme, jestli není novější verze (nejvýš jednou za 10 minut).
+    // Telefon aplikaci často jen uspí. Při návratu se proto zeptáme, jestli není novější verze (nejvýš jednou za minutu).
     freshSince = Date.now();
     touched = false;
-    if (Date.now() - checkedAt > 600000) {
+    if (Date.now() - checkedAt > 60000) {
       checkedAt = Date.now();
       navigator.serviceWorker.controller?.postMessage({ type: 'check' });
     }
