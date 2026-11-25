@@ -165,10 +165,10 @@ function celebrate() {
   const layer = document.createElement('div');
   layer.className = 'confetti';
   document.body.appendChild(layer);
-  for (let i = 0; i < 36; i++) {
+  for (let i = 0; i < 56; i++) {
     const p = document.createElement('i');
     const angle = Math.random() * Math.PI * 2;
-    const dist = 60 + Math.random() * 150;
+    const dist = 70 + Math.random() * 190;
     const dx = Math.cos(angle) * dist, dy = Math.sin(angle) * dist - 70;
     const size = 5 + Math.random() * 6;
     p.style.cssText = `left:${lastTap.x}px;top:${lastTap.y}px;width:${size}px;height:${size * (Math.random() < 0.5 ? 1 : 0.45)}px;` +
@@ -176,11 +176,11 @@ function celebrate() {
     layer.appendChild(p);
     p.animate([
       { transform: 'translate3d(0,0,0) rotate(0deg) scale(0.4)', opacity: 1 },
-      { transform: `translate3d(${dx}px,${dy}px,0) rotate(${Math.random() * 540 - 270}deg) scale(1)`, opacity: 1, offset: 0.55 },
-      { transform: `translate3d(${dx * 1.15}px,${dy + 100}px,0) rotate(${Math.random() * 720 - 360}deg) scale(0.9)`, opacity: 0 },
-    ], { duration: 850 + Math.random() * 400, easing: 'cubic-bezier(0.16, 0.8, 0.3, 1)', fill: 'forwards' });
+      { transform: `translate3d(${dx}px,${dy}px,0) rotate(${Math.random() * 540 - 270}deg) scale(1)`, opacity: 1, offset: 0.4 },
+      { transform: `translate3d(${dx * 1.2}px,${dy + 190}px,0) rotate(${Math.random() * 720 - 360}deg) scale(0.9)`, opacity: 0 },
+    ], { duration: 1700 + Math.random() * 800, easing: 'cubic-bezier(0.16, 0.8, 0.3, 1)', fill: 'forwards' });
   }
-  setTimeout(() => layer.remove(), 1500);
+  setTimeout(() => layer.remove(), 2800);
 }
 
 // Částka, která při změně plynule „doběhne“ na novou hodnotu.
@@ -927,10 +927,12 @@ function EntryRow({ group, e, onEntry, onDelete, showDate }) {
   let mine, emoji, title, total, tag = null, forWho;
   if (transfer) {
     const to = Object.keys(e.parts)[0];
-    // Dopad na můj zůstatek: kdo platí, tomu zůstatek roste; příjemci klesá.
-    mine = e.paidBy === group.me ? base : to === group.me ? -base : 0;
     // Převedený dluh z jiné skupiny čteme jako „dlužník dluží věřiteli“, ne jako platbu.
     const moved = e.mvd === 'in';
+    // Skutečná splátka se ukazuje jako pohyb peněz: přišly mi = zelené plus, poslal jsem je = červené minus.
+    // U převodu dluhu mezi skupinami žádné peníze netečou, tam zůstává dopad na zůstatek (věřiteli roste, dlužníkovi klesá).
+    mine = e.mv ? (e.paidBy === group.me ? base : to === group.me ? -base : 0)
+      : to === group.me ? base : e.paidBy === group.me ? -base : 0;
     const paid = !e.mv && (!e.title || e.title === 'Převod' || /vyrovn|uhra[zd]/i.test(e.title));
     emoji = e.mv ? '🔀' : '🤝';
     title = moved ? `${nameOf(group, to)} dluží ${nameOf(group, e.paidBy)}` : `${nameOf(group, e.paidBy)} → ${nameOf(group, to)}`;
@@ -1374,6 +1376,11 @@ function EntryForm({ group, entry, repeat, onSave, onDelete }) {
   // Kategorie se nastaví sama podle názvu, dokud ji uživatel nevybere ručně. Nejdřív klíčová slova skupiny,
   // pak kam podobný záznam zařadila tahle skupina dřív, a teprve pak obecná klíčová slova.
   function typeTitle(v) {
+    // Napsaný začátek, který skupina zná („záloha“ + mezera), se sám doplní na „Záloha - “.
+    if (v.length > title.length && /\S\s$/.test(v) && !/[-–—]/.test(v)) {
+      const hit = starts.find((s) => s.label.toLowerCase() === v.trim().toLowerCase());
+      if (hit) { v = hit.label + ' - '; if (hit.id && !catTouched) { setTitle(v); setCategory(hit.id); return; } }
+    }
     setTitle(v);
     const g = customCategory(group, v) || learnedCategory(group.entries, v) || guessCategory(v);
     if (!catTouched) setCategory(g); // co nepoznáme, jde do Ostatní
