@@ -1790,7 +1790,7 @@ function PaySheet({ group, pay, onSave }) {
       </div>
       ${via === 'qr' && (!pay.iban ? noIban : !qrAmount ? html`<p class="hint">QR kód se ukáže po zadání částky.</p>` : html`
         <div class="qr">
-          <${Qr} alt="QR platba" text=${spayd(pay.iban, qrAmount, cur, `${group.name} - ${from}`)} />
+          <${Qr} alt="QR platba" text=${spayd(pay.iban, qrAmount, cur)} />
           <p class="hint">Naskenuj v bankovní aplikaci; účet i částka ${fmt(qrAmount, cur)} se vyplní samy. Po zaplacení platbu dole zapiš.</p>
         </div>`)}
       ${via === 'bank' && (!pay.iban ? noIban : html`

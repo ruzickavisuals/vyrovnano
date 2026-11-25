@@ -343,9 +343,9 @@ export function toIban(input) {
 }
 
 // Řetězec pro český standard QR Platba.
-export function spayd(iban, cents, currency, msg) {
-  const clean = msg.normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/\*/g, ' ').slice(0, 60);
-  return `SPD*1.0*ACC:${iban}*AM:${(cents / 100).toFixed(2)}*CC:${currency}*MSG:${clean}`;
+// QR platba bez zprávy pro příjemce: do banky se předvyplní jen účet, částka a měna (Filip, 26. 11. 2026: žádný předepsaný předmět platby).
+export function spayd(iban, cents, currency) {
+  return `SPD*1.0*ACC:${iban}*AM:${(cents / 100).toFixed(2)}*CC:${currency}`;
 }
 
 export function dateLabel(iso) {
