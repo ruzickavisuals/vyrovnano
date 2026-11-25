@@ -229,6 +229,24 @@ export function wholeCrowns(bal) {
   return r;
 }
 
+// Co záznam znamená pro mě – jediné místo, které určuje barvu a znaménko u řádku. Kladné = zelená, záporné = červená, 0 = netýká se mě.
+// Pravidlo (Filip, 25. 11. 2026): řádek má vždy ukazovat skutečný směr peněz z mého pohledu, nikdy účetní změnu zůstatku.
+//  - splátka dluhu (převod): přišly mi peníze = plus; poslal jsem je = minus,
+//  - výdaj: zaplatil jsem za ostatní = plus (vrátí se mi); někdo platil za mě = minus (dlužím),
+//  - příjem: přijal ho někdo jiný a mám z něj podíl = plus (dostanu); přijal jsem ho já a část patří ostatním = minus (dlužím jim),
+//  - převod dluhu mezi skupinami (mv): peníze netečou; věřiteli plus (dostane), dlužníkovi minus (dluží).
+export function myImpact(e, me) {
+  if (!me) return 0;
+  const base = baseAmount(e);
+  if (e.kind === 'transfer') {
+    const to = Object.keys(e.parts || {})[0];
+    if (e.mv) return e.paidBy === me ? base : to === me ? -base : 0;
+    return to === me ? base : e.paidBy === me ? -base : 0;
+  }
+  const net = (e.paidBy === me ? base : 0) - (shares(e)[me] || 0);
+  return e.kind === 'income' ? -net : net;
+}
+
 // Navrhne co nejméně plateb: největší dlužník platí největšímu věřiteli.
 export function settle(bal) {
   const debt = [], cred = [];

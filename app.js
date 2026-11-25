@@ -1,6 +1,6 @@
 import { html, render, useState, useEffect, useLayoutEffect, useMemo, useRef } from './vendor/preact-htm.js';
 import {
-  CATS, cat, catOf, guessCategory, learnedCategory, registerCats, customCategory, applyCats, titleStarts, CURRENCIES, uid, today, fmt, parseAmount, groupAmount, allocate, baseAmount, shares,
+  CATS, cat, catOf, guessCategory, learnedCategory, registerCats, customCategory, applyCats, titleStarts, CURRENCIES, uid, today, fmt, parseAmount, groupAmount, myImpact, allocate, baseAmount, shares,
   balances, settle, stats, debtMove, vocative, toIban, spayd, dateLabel, seed, nextDue, runRecurring,
 } from './logic.js';
 import {
@@ -924,15 +924,12 @@ function EntryRow({ group, e, onEntry, onDelete, showDate }) {
   const member = (id) => group.members.find((m) => m.id === id) || { id, name: '?' };
   const transfer = e.kind === 'transfer';
   const inc = e.kind === 'income';
-  let mine, emoji, title, total, tag = null, forWho;
+  const mine = myImpact(e, group.me); // barvu a znaménko určuje jen logic.js → myImpact
+  let emoji, title, total, tag = null, forWho;
   if (transfer) {
     const to = Object.keys(e.parts)[0];
     // Převedený dluh z jiné skupiny čteme jako „dlužník dluží věřiteli“, ne jako platbu.
     const moved = e.mvd === 'in';
-    // Skutečná splátka se ukazuje jako pohyb peněz: přišly mi = zelené plus, poslal jsem je = červené minus.
-    // U převodu dluhu mezi skupinami žádné peníze netečou, tam zůstává dopad na zůstatek (věřiteli roste, dlužníkovi klesá).
-    mine = e.mv ? (e.paidBy === group.me ? base : to === group.me ? -base : 0)
-      : to === group.me ? base : e.paidBy === group.me ? -base : 0;
     const paid = !e.mv && (!e.title || e.title === 'Převod' || /vyrovn|uhra[zd]/i.test(e.title));
     emoji = e.mv ? '🔀' : '🤝';
     title = moved ? `${nameOf(group, to)} dluží ${nameOf(group, e.paidBy)}` : `${nameOf(group, e.paidBy)} → ${nameOf(group, to)}`;
@@ -941,7 +938,6 @@ function EntryRow({ group, e, onEntry, onDelete, showDate }) {
     forWho = [to];
   } else {
     const sh = shares(e);
-    mine = (inc ? -1 : 1) * ((e.paidBy === group.me ? base : 0) - (sh[group.me] || 0));
     emoji = inc && catOf(e) === 'other' ? '💰' : cat(catOf(e)).e;
     title = e.title;
     total = (inc ? '+' : '') + fmt(base, cur);
